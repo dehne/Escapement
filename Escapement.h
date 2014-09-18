@@ -28,15 +28,14 @@
 // Run mode constants
 #define COLDSTART		(0)
 #define WARMSTART		(1)
-#define SCALE     		(2)
-#define CALIBRATE		(3)
-#define CALFINISH   	(4)
-#define RUN				(5)
+#define CALIBRATE		(2)
+#define CALFINISH   	(3)
+#define RUN				(4)
+#define CALRTC			(5)
 
 // Mode run length constants
-#define TGT_SETTLE		(32)				// Number of beats to run SETTLE mode 
-#define TGT_SCALE		(128)				// Number of cycles (ie., beats * 2) to run SCALE mode
-#define TGT_SMOOTHING	(2048)				// Number of cycles to run CALIBRATE mode for a given temperature
+#define TGT_SCALE		(256)				// Number of cycles (ie., beats * 2) to run SCALE mode
+#define TGT_SMOOTHING	(4096)				// Number of cycles to run CALIBRATE mode for a given temperature
 
 // Bendulum sensing and and pushing constants
 #define SETTLE_TIME 	(250)				// Time (ms) to delay to let things settle before looking for voltage spike
@@ -72,7 +71,6 @@ private:
 	byte kickPin;							// Pin on which we kick the bendulum as it passes
 	int cycleCounter;						// Current cycle counter for SETTLING and SCALING modes
 	settings_t eeprom;						// Contents of EEPROM -- our persistent parameters
-	int curSmoothing[TEMP_STEPS];			// Current temp-dependent smoothing factor
 	int tempIx;								// Temperature index (0 <= tempIx < TEMP_STEPS). -1 if none
 	int lastTempIx;							// Temperature index last time we calculated it
 	boolean tick;							// Whether currently awaiting a tick or a tock
@@ -94,12 +92,11 @@ public:
 // Operational methods
 	void enable(byte initialMode = RUN);	// Do initialization of Escapement that needs to be done in startup()
 	long beat();							// Do one beat (half a cycle) return  length of a beat in μs
-	long cycle();							// Do one cycle (two beats) return length of a beat in μs
 // Getters and setters
 	int getCycleCounter();					// Get the number of cycles in the current mode (except RUNNING)
-	int getBias();							// Get Arduino clock correction in tenths of a second per day
-	void setBias(int factor);				// Set Arduino clock correction in tenths of a second per day
-	int incrBias(int factor);				// Increment Arduino clock correction by factor tenths of a second per day
+	long getBias();							// Get Arduino clock correction in tenths of a second per day
+	void setBias(long factor);				// Set Arduino clock correction in tenths of a second per day
+	long incrBias(long factor);				// Increment Arduino clock correction by factor tenths of a second per day
 	int getPeakScale();						// Get the peak induced voltage scaling factor
 	void setPeakScale(int scaleFactor);		// Set the peak induced voltage scaling factor
 	float getTemp();						// Get the current temperature in C; -1 if none
@@ -111,7 +108,7 @@ public:
 	long getBeatDelta();					// Get the beat duration delta in μs
 	void setBeatDelta(long beatDelta);		// Set the beat duration delta in μs
 	long incrBeatDelta(long incr);			// Increment beat duration delta so that clock runs faster by incr seconds per day
-	int getRunMode();						// Get the current run mode -- SETTLING, CALIBRATING or RUNNING
+	byte getRunMode();						// Get the current run mode -- SETTLING, CALIBRATING or RUNNING
 	void setRunMode(byte mode);				// Set the run mode
 };
 
