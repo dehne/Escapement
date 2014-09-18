@@ -60,18 +60,15 @@ assumes that the Arduino real-time clock is accurate, which it probably isn't.
 To cause the Escapement to ignore the persistent parameters in EEPROM and start from scratch, invoke the
 enable(COLDSTART) method instead of enable().
 
+Cold starting only lasts one beat and is used to reset the real-time clock correction to zero. Once that id done 
+the Escapement enters WARMSTART mode.
 
-Except during hot start, the Escapement object quickly enters WARMSTART mode. It continues in  this mode for 
-TGT_SETTLE beats. The purpose of this mode is to let the bendulum or pendulum settle into a regular motion since 
-its motion is typically disturbed at startup from having been given a start-up push by hand. While in WARMSTART 
-mode, the duration returned is measured using the (corrected) Arduino real-time Clock.
+Except during hot start, the Escapement object quickly enters WARMSTART mode. It continues in  this mode 
+TGT_SCALE cycles. (A cycle is two beats.) During WARMSTART mode, the peak voltage induced in the coil by the 
+passing magnet is determined and saved in eeprom.peakScale. During WARMSTART mode, the duration beat() returns is 
+measured using the (corrected) Arduino real-time Clock.
 
-Once it completes WARMSTART mode the Escapement object switches to SCALE mode for getTgtScale() cycles. (A cycle 
-is two beats.) During SCALE mode, the peak voltage induced in the coil by the passing magnet is determined and 
-saved in eeprom.peakScale. During SCALE mode, the duration beat() returns is measured using the (corrected) 
-Arduino real-time Clock.
-
-With SCALE over, the Escapement object moves to CALIBRATE mode, in which it remains for TGT_SMOOTHING 
+With WARMSTART over, the Escapement object moves to CALIBRATE mode, in which it remains for TGT_SMOOTHING 
 additional cycles of equal temperature. If the temperature changes before TGT_SMOOTHING cycles pass, whatever 
 progress has been made on calibrating for the old temperature is maintained, and calibration at the new 
 temperature is started or, if partial calibration at that temperature has been done earlier, resumed. During 
@@ -99,4 +96,11 @@ To correct for this, we use a correction factor, eeprom.bias. The value of eepro
 a second per day by which the real-time clock in the Arduino must be compensated in order for it to be accurate. 
 Positive eeprom.bias means the real-time clock's "microseconds" are shorter than real microseconds. Since the 
 real-time clock is the standard that's used for calibration, automatic calibration won't work well unless 
-eeprom.bias is set correctly.
+eeprom.bias is set correctly. To help with setting eeprom.bias Escapement has one more mode: CALRTC.
+
+In CALRTC, the duration beat() returns is value measured by the (corrected) Arduino real-time Clock. It persists 
+until changed with setRunMode(). Because the value returned is the RTC-measured value, in this mode the 
+Escapement is effectively driven by the RTC, not the pendulum or bendulum, despite the ticking and tocking. The 
+idea is to use the mode to adjust the RTC calibration (via the setBias() and incrBias() methods) so that the 
+clock driven by the Escapement keeps perfect time. Once the real-time clock is calibrated, entering WARMSTART 
+mode should produce a good automatic calibration.
