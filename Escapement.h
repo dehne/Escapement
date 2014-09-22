@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.20
+ *   Part of the "Escapement" library for Arduino. Version 0.21
  *
  *   Escapement.h Copyright 2014 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -35,7 +35,7 @@
 
 // Mode run length constants
 #define TGT_SCALE		(256)				// Number of cycles (ie., beats * 2) to run SCALE mode
-#define TGT_SMOOTHING	(4096)				// Number of cycles to run CALIBRATE mode for a given temperature
+#define TGT_SMOOTHING	(4096)				// Number of beats to run CALIBRATE mode for a given temperature
 
 // Bendulum sensing and and pushing constants
 #define SETTLE_TIME 	(250)				// Time (ms) to delay to let things settle before looking for voltage spike
@@ -74,8 +74,6 @@ private:
 	int tempIx;								// Temperature index (0 <= tempIx < TEMP_STEPS). -1 if none
 	int lastTempIx;							// Temperature index last time we calculated it
 	boolean tick;							// Whether currently awaiting a tick or a tock
-	long tickAvg;							// Average duration of ticks (μs)
-	long tockAvg;							// Average duration of tocks (μs)
 	long tickPeriod;						// Duration of last tick (μs)
 	long tockPeriod;						// Duration of last tock (μs)
 	unsigned long lastTime;					// Clock time (μs) last time through beat()

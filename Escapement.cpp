@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.20
+ *   Part of the "Escapement" library for Arduino. Version 0.21
  *
  *   Escapement.cpp Copyright 2014 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -76,18 +76,18 @@
  *   CALIBRATE mode lasts for TGT_SMOOTHING cycles of equal temperature. If the temperature changes before 
  *   TGT_SMOOTHING cycles pass, whatever progress has been made on calibrating for the old temperature is maintained, 
  *   and calibration at the new temperature is started or, if partial calibration at that temperature has been done 
- *   earlier, resumed. During CALIBRATE mode, the average duration of tick and tock beats is measured and saved in 
- *   tickAvg, tockAvg and their average is saved in eeprom.uspb[tempiX]. When calibration for the current temperature 
- *   completes TGT_SMOOTHING cycles, the Escapement object stores the contents of eeprom -- Escapement's persistent 
- *   parameters -- in the Arduino's EEPROM and switches to CALFINISH mode. During CALIBRATE mode, beat() returns 
- *   eeprom.uspb[tempIx].
+ *   earlier, resumed. During CALIBRATE mode, the average duration the beats is measured and saved in 
+ *   eeprom.uspb[tempiX]. When calibration for the current temperature completes TGT_SMOOTHING cycles, the Escapement 
+ *   object stores the contents of eeprom -- Escapement's persistent parameters -- in the Arduino's EEPROM and 
+ *   switches to CALFINISH mode. During CALIBRATE mode, beat() returns eeprom.uspb[tempIx] + eeprom.deltaUspb.
  *
  *   The CALFINISH mode serves as notice to the using sketch that calibration for the current temperature is complete. 
- *   The Escapement object then switches to RUN mode. In CALFINISH mode, beat() returns eeprom.uspb[tempix].
+ *   The Escapement object then switches to RUN mode. In CALFINISH mode, beat() returns eeprom.uspb[tempIx] + 
+ *   eeprom.deltaUspb.
  *
  *   RUN mode persists so long as the temperature stays the same. If the temperature changes, and calibration for the  
  *   new temperature has not been completely calculated, the Escapement object switches to CALIBRATE mode. During RUN 
- *   mode, beat() returns eeprom.uspb[tempIx].
+ *   mode, beat() returns eeprom.uspb[tempIx] + eeprom.deltaUspb.
  *
  *   The net effect is that the Escapement object automatically characterizes the bendulum or pendulum it is driving,
  *   first by measuring the strength of the pulses the passing magnet induces in the coil and second by measuring the 
@@ -160,7 +160,6 @@ void Escapement::enable(byte initialMode) {
 		setRunMode(COLDSTART);				//    Cold start
 	}
 	tick = true;							// Whether currently awaiting a tick or a tock
-	tickAvg = tockAvg = 0;					// Average period of ticks and tocks (μs)
 	tickPeriod = tockPeriod = 0;			// Length of last tick and tock periods (μs)
 	timeBeforeLast = lastTime = 0;			// Clock time (μs) last time through beat() (and time before that)
 }
@@ -228,7 +227,6 @@ long Escapement::beat(){
 					setRunMode(CALIBRATE);		//     and if just done scaling switch from WARMSTART to CALIBRATE
 				}
 			}
-			eeprom.uspb[tempIx] = deltaT;
 			break;
 		case CALIBRATE:							// When doing calibration
 			if (tempIx != lastTempIx) {			//   If a new temperature reading
@@ -236,35 +234,25 @@ long Escapement::beat(){
 												//     If new temp is already calibrated
 					setRunMode(RUN);			//       Switch to RUN mode
 					break;
-				} else {						//     Else continue calibration for new temp
-					tickAvg = tockAvg = eeprom.uspb[tempIx];
 				}
 			}
-			if (tickAvg == 0 && !tick) {		//   If starting a calibration on a tock
-				break;							//     Wait 'til next time; the calculations
-			}									//     assume starting on a tick
 			if (tick) {							//   If tick
 				tickPeriod = topTime - lastTime;//     Calculate tick period and update tick average
 				tickPeriod += ((eeprom.bias * tickPeriod) + 432000) / 864000;
-				tickAvg += (tickPeriod - tickAvg) / eeprom.curSmoothing[tempIx];
+				eeprom.uspb[tempIx] += (tickPeriod - eeprom.uspb[tempIx]) / eeprom.curSmoothing[tempIx];
 			} else {							//   Else it's tock
 				tockPeriod = topTime - lastTime;//     Calculate tock period and update tock average
 				tockPeriod += ((eeprom.bias * tockPeriod) + 432000) / 864000;
-				tockAvg += (tockPeriod - tockAvg) / eeprom.curSmoothing[tempIx];
-				if (++eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
-												//     If just reached a full smoothing interval
-					writeEEPROM();				//       Make calibration parms persistent
-					setRunMode(CALFINISH);		//       Switch to CALFINISH mode
-				}
+				eeprom.uspb[tempIx] += (tockPeriod - eeprom.uspb[tempIx]) / eeprom.curSmoothing[tempIx];
 			}
-			if (tockAvg == 0) {					//   If no tockAvg, eeprom.uspb[tempIx] is tickAvg
-				eeprom.uspb[tempIx] = tickAvg;
-			} else {							//   If both tickAvg and tockAvg, eeprom.uspb[tempIx] is their average
-				eeprom.uspb[tempIx] = (tickAvg + tockAvg) / 2;
+			if (++eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
+												//   If just reached a full smoothing interval
+				writeEEPROM();					//     Make calibration parms persistent
+				setRunMode(CALFINISH);			//     Switch to CALFINISH mode
+			}
 			deltaT = eeprom.uspb[tempIx] + eeprom.deltaUspb;
-			}
 			break;
-		case CALFINISH:						// When finished calibrating
+		case CALFINISH:							// When finished calibrating
 			setRunMode(RUN);					//  Switch to RUN mode
 			deltaT = eeprom.uspb[tempIx] + eeprom.deltaUspb;
 			break;
@@ -362,7 +350,8 @@ float Escapement::getDelta(){
 }
 // Get current beat duration in microseconds
 long Escapement::getBeatDuration(){
-	return eeprom.deltaUspb + eeprom.uspb[tempIx];
+	if (lastTime == 0 || timeBeforeLast == 0) return 0;
+	return lastTime - timeBeforeLast + eeprom.deltaUspb;
 }
 // Get or set the beat delta in μs per beat or increment it in tenths of a second per day
 long Escapement::getBeatDelta() {
@@ -406,7 +395,6 @@ void Escapement::setRunMode(byte mode){
 			eeprom.peakScale = INIT_PEAK;	//     Reset eeprom.peakScale
 			break;
 		case CALIBRATE:						//   Switch to basic calibration mode
-			tickAvg = tockAvg = eeprom.uspb[tempIx]; //     Set averages
 			break;
 		case CALFINISH:						//   Switch to calibration finished mode
 			break;
