@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.21
+ *   Part of the "Escapement" library for Arduino. Version 0.22
  *
  *   Escapement.cpp Copyright 2014 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -65,9 +65,9 @@
  *   having no valid content. Once that is done the Escapement enters WARMSTART mode.
  *
  *   Except during hot start, the Escapement object quickly enters WARMSTART mode. It continues in  this mode 
- *   TGT_SCALE cycles. (A cycle is two beats.) During WARMSTART mode, the peak voltage induced in the coil by the 
- *   passing magnet is determined and saved in eeprom.peakScale. During WARMSTART mode, the duration beat() returns is 
- *   measured using the (corrected) Arduino real-time Clock.
+ *   TGT_SCALE beats. During WARMSTART mode, the peak of the voltage spike induced in the coil by the passing magnet 
+ *   is observed and the scaling factor required to detect it reliably is saved in eeprom.peakScale. During WARMSTART 
+ *   mode, the duration beat() returns is measured using the (corrected) Arduino real-time Clock.
  *
  *   With WARMSTART over, the Escapement object moves either CALRTC or to CALIBRATE mode, depending on whether the 
  *   Arduino's EEPROM has valid content. If it does not, we enter CALRTC mode to calibrate the Arduino real-time 
@@ -223,9 +223,9 @@ long Escapement::beat(){
 				tickPeriod = deltaT;
 			} else {							//   Else (tock), remember tockPeriod
 				tockPeriod = deltaT;
-				if (++cycleCounter > TGT_SCALE) {
-					setRunMode(CALIBRATE);		//     and if just done scaling switch from WARMSTART to CALIBRATE
-				}
+			}
+			if (++cycleCounter > TGT_SCALE) {
+				setRunMode(CALIBRATE);			//   If just done scaling switch from WARMSTART to CALIBRATE
 			}
 			break;
 		case CALIBRATE:							// When doing calibration

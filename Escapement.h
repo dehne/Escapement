@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.21
+ *   Part of the "Escapement" library for Arduino. Version 0.22
  *
  *   Escapement.h Copyright 2014 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -34,22 +34,22 @@
 #define CALRTC			(5)
 
 // Mode run length constants
-#define TGT_SCALE		(256)				// Number of cycles (ie., beats * 2) to run SCALE mode
-#define TGT_SMOOTHING	(4096)				// Number of beats to run CALIBRATE mode for a given temperature
+#define TGT_SCALE		(512)				// Number of beats to run SCALE mode
+#define TGT_SMOOTHING	(8192)				// Number of beats to run CALIBRATE mode for a given temperature
 
 // Bendulum sensing and and pushing constants
-#define SETTLE_TIME 	(250)				// Time (ms) to delay to let things settle before looking for voltage spike
-#define DELAY_TIME		(5)					// Time in ms by which to delay the start of the kick pulse
-#define KICK_TIME		(20)				// Duration in ms of the kick pulse
+#define SETTLE_TIME 	(125)				// Time to delay to let things settle before looking for voltage spike (ms)
+#define DELAY_TIME		(5)					// Time by which to delay the start of the kick pulse (ms)
+#define KICK_TIME		(10)				// Duration of the kick pulse (ms)
 #define INIT_PEAK		(10)				// Initial guess at peakScale during SCALE mode. (Must be less than the actual)
 #define MAX_PEAK		(1)					// Scale the peaks (using eeprom.peakScale) so they're no bigger than this
 
 
 // Other constants
-#define ADDRESS_TMP102 (0x48)				// Wire address of the TMP102 temperature sensor
-#define TEMP_MIN (13)						// Minimum temp we bother with (degrees C)
-#define TEMP_MAX (38)                       // Maximum temp we bother with (degrees C)
-#define TEMP_STEPS (50)						// Number of 0.5C steps we keep track of: 2 * (TEMP_MAX - TEMP_MIN)
+#define ADDRESS_TMP102	(0x48)				// Wire address of the TMP102 temperature sensor
+#define TEMP_MIN		(13)				// Minimum temp we bother with (degrees C)
+#define TEMP_MAX		(38)				// Maximum temp we bother with (degrees C)
+#define TEMP_STEPS		(50)				// Number of 0.5C steps we keep track of: 2 * (TEMP_MAX - TEMP_MIN)
 
 // EEPROM data structure definition
 struct settings_t {							// Structure of data stored in EEPROM
