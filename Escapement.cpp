@@ -136,17 +136,18 @@ Escapement::Escapement(byte sPin, byte kPin){
 
 // Enable the Escapement -- do the initialization that needs to be done in setup()
 void Escapement::enable(byte initialMode) {
-	analogReference(EXTERNAL);				// We have an external reference, a 47k+47k voltage divider between 
+	analogReference(EXTERNAL);				// We have an external reference, a 47k+47k voltage divider between
 											//   3.3V and ground
 	pinMode(sensePin, INPUT);				// Set sense pin to INPUT since we read from it
 	pinMode(kickPin, INPUT);				// Put the kick pin in INPUT (high impedance) mode so that the
 											//   induced current doesn't flow to ground
 	Wire.begin();							// Prep to talk to the TMP102
+	beatCounter = 1;						// Initialize beatCounter
 
-	cycleCounter = 1;						// Current cycle counter for WARMSTART and SCALE modes
 	if (initialMode != COLDSTART) {			// If forced cold start isn't requested
 		if (readEEPROM()) {					//   Try getting info from EEPROM. If that works
-			lastTempIx = tempIx = getTempIx();	//     Get the temperature
+			lastTempIx = tempIx = getTempIx();	
+											//     Try getting the temperature
 			if (eeprom.peakScale > INIT_PEAK && tempIx != -1) {
 											//      If temp getting worked and we have been through SCALE mode
 				setRunMode(RUN);			//        go right to RUN mode
@@ -210,7 +211,7 @@ long Escapement::beat(){
 			break;
 		case WARMSTART:								// When scaling
 			if (pastCoil > MAX_PEAK) {			//  If the peak was more than MAX_PEAK, increase the 
-				eeprom.peakScale += 1;			//   scaling factor by one. We want 1 <= peaks < 2
+				eeprom.peakScale += 1;			//   scaling factor by one. We want 1 <= peak < MAX_PEAK
 			}
 			deltaT = topTime - lastTime;		//   Microseconds per beat is whatever we measured for this beat
 												//   plus the (rounded) Arduino clock correction
@@ -224,13 +225,13 @@ long Escapement::beat(){
 			} else {							//   Else (tock), remember tockPeriod
 				tockPeriod = deltaT;
 			}
-			if (++cycleCounter > TGT_SCALE) {
+			if (++beatCounter > TGT_SCALE) {
 				setRunMode(CALIBRATE);			//   If just done scaling switch from WARMSTART to CALIBRATE
 			}
 			break;
 		case CALIBRATE:							// When doing calibration
 			if (tempIx != lastTempIx) {			//   If a new temperature reading
-				if (eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
+				if (curSmoothing[tempIx] > TGT_SMOOTHING) {
 												//     If new temp is already calibrated
 					setRunMode(RUN);			//       Switch to RUN mode
 					break;
@@ -239,13 +240,13 @@ long Escapement::beat(){
 			if (tick) {							//   If tick
 				tickPeriod = topTime - lastTime;//     Calculate tick period and update tick average
 				tickPeriod += ((eeprom.bias * tickPeriod) + 432000) / 864000;
-				eeprom.uspb[tempIx] += (tickPeriod - eeprom.uspb[tempIx]) / eeprom.curSmoothing[tempIx];
+				eeprom.uspb[tempIx] += (tickPeriod - eeprom.uspb[tempIx]) / curSmoothing[tempIx];
 			} else {							//   Else it's tock
 				tockPeriod = topTime - lastTime;//     Calculate tock period and update tock average
 				tockPeriod += ((eeprom.bias * tockPeriod) + 432000) / 864000;
-				eeprom.uspb[tempIx] += (tockPeriod - eeprom.uspb[tempIx]) / eeprom.curSmoothing[tempIx];
+				eeprom.uspb[tempIx] += (tockPeriod - eeprom.uspb[tempIx]) / curSmoothing[tempIx];
 			}
-			if (++eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
+			if (++curSmoothing[tempIx] > TGT_SMOOTHING) {
 												//   If just reached a full smoothing interval
 				writeEEPROM();					//     Make calibration parms persistent
 				setRunMode(CALFINISH);			//     Switch to CALFINISH mode
@@ -257,7 +258,7 @@ long Escapement::beat(){
 			deltaT = eeprom.uspb[tempIx] + eeprom.deltaUspb;
 			break;
 		case RUN:								// When running
-			if (eeprom.curSmoothing[tempIx] < TGT_SMOOTHING){
+			if (curSmoothing[tempIx] < TGT_SMOOTHING){
 				setRunMode(CALIBRATE);			//   Current temp's calibration isn't finished, switch to CALIBRATE mode
 			}
 			deltaT = eeprom.uspb[tempIx] + eeprom.deltaUspb;
@@ -289,10 +290,10 @@ long Escapement::beat(){
  */
 
 // Get the number of cycles we've been in the current mode
-int Escapement::getCycleCounter(){
+int Escapement::getbeatCounter(){
 	if (runMode == RUN) return -1;				// We don't count this since it could be huge
-	if (runMode == CALIBRATE) return eeprom.curSmoothing[tempIx];
-	return cycleCounter;
+	if (runMode == CALIBRATE) return curSmoothing[tempIx];
+	return beatCounter;
 }
  
 // Get, set or increment Arduino clock run rate correction in tenths of a second per day
@@ -329,6 +330,11 @@ boolean Escapement::isTick() {
 	return tick;
 }
 
+// Are we running emperature compensated?
+boolean Escapement::isTempComp() {
+	return eeprom.compensated;
+}
+
 // Get average beats per minute
 float Escapement::getAvgBpm(){
 	if (eeprom.uspb[tempIx] == 0) return 0;
@@ -355,16 +361,16 @@ long Escapement::getBeatDuration(){
 }
 // Get or set the beat delta in μs per beat or increment it in tenths of a second per day
 long Escapement::getBeatDelta() {
-	return eeprom.deltaUspb;
+	return (eeprom.deltaUspb * 864000.0) / eeprom.uspb[tempIx];
 }
 void Escapement::setBeatDelta(long beatDelta) {
-	eeprom.deltaUspb = beatDelta;
+	eeprom.deltaUspb = round(eeprom.uspb[tempIx] * (beatDelta / 864000.0));
 	writeEEPROM();								// Make it persistent
 }
 long Escapement::incrBeatDelta(long incr) {
 	eeprom.deltaUspb += round(eeprom.uspb[tempIx] * (incr / 864000.0));	
 	writeEEPROM();								// Make it persistent
-	return eeprom.deltaUspb;
+	return (eeprom.deltaUspb * 864000.0) / eeprom.uspb[tempIx];
 }
 
 // Get/set the current run mode -- COLDSTART, WARMSTART, CALIBRATE, RUN or CALRTC
@@ -381,7 +387,7 @@ void Escapement::setRunMode(byte mode){
 #endif
 			break;
 		case WARMSTART:						//   Switch to warm starting mode
-			cycleCounter = 1;				//     Reset cycle counter
+			beatCounter = 1;				//     Reset cycle counter
 			eeprom.compensated = true;		//     Assume we'll be doing temperature compensation and then test the assumption
 			eeprom.compensated = !(getTempIx() == -1);
 			lastTempIx = tempIx = getTempIx();	// Get the temp index
@@ -389,9 +395,8 @@ void Escapement::setRunMode(byte mode){
 			eeprom.deltaUspb = 0;			//     Default clock speed adjustment
 			for (int i = 0; i < TEMP_STEPS; i++) {
 				eeprom.uspb[i] = 0;			//     Wipe out old calibration info, if any
-				eeprom.curSmoothing[i] = 1;
+				curSmoothing[i] = 1;
 			}								//     Default eeprom.deltaUspb and eeprom.deltaSmoothing
-			cycleCounter = 1;				//     Reset cycle counter
 			eeprom.peakScale = INIT_PEAK;	//     Reset eeprom.peakScale
 			break;
 		case CALIBRATE:						//   Switch to basic calibration mode
@@ -422,18 +427,22 @@ int Escapement::getTempIx() {
 			if (temp >= TEMP_MIN * 2 && temp <= TEMP_MAX * 2) {
 				return temp - (2 * TEMP_MIN);
 			}
+#ifdef DEBUG
 		} else {
 			Serial.println("Wire.available failed");
+#endif
 		}
+#ifdef DEBUG
 	} else {
 		Serial.println("Wire.requestFrom failed.");
+#endif
 	}
 	return -1;
 }
 
 /*
  *
- * private methods to read and write EEPROM
+ * Private methods to read and write EEPROM
  *
  */
 
@@ -445,14 +454,22 @@ boolean Escapement::readEEPROM() {
 	eeprom.id = 0; 								// Debug: Force eeprom.id to be wrong
 #endif
 	if (eeprom.id == SETTINGS_TAG) {			// If it looks like ours
+		for (int i = 0; i < TEMP_STEPS; i++) {	//   Go through eeprom.uspb[]
+			if (eeprom.uspb[i] <= 0) {			//   and set up eeprom.uspb and curSmoothing
+				eeprom.uspb[i] = 0;				//   based on whether the calibration info is
+				curSmoothing[i] = 1;			//   valid. Positive values are validly calibrated
+			} else {							//   non-positive values need to be done from scratch
+				curSmoothing[i] = TGT_SMOOTHING + 1;
+			}
+		}
 		return true;							//  Say we read it okay
 	} else {									// Otherwise
 		eeprom.id = 0;							//   Default id to note that eeprom not written
 		eeprom.bias = 0;						//   Default eeprom.bias (tenths of a second per day)
 		eeprom.peakScale = INIT_PEAK;			//   Default peak scaling value (adjusted during calibration)
-		for (int i = 0; i < TEMP_STEPS; i++) {	//   Default eeprom.uspb[] and eeprom.curSmoothing[]
+		for (int i = 0; i < TEMP_STEPS; i++) {	//   Default eeprom.uspb[] and curSmoothing[]
 			eeprom.uspb[i] = 0; 
-			eeprom.curSmoothing[i] = 1;
+			curSmoothing[i] = 1;
 		}
 		return false;
 	}
@@ -461,5 +478,15 @@ boolean Escapement::readEEPROM() {
 // Write EEPROM
 void Escapement::writeEEPROM() {
 	eeprom.id = SETTINGS_TAG;					// Mark the EEPROM data structure as ours
+	for (int i = 0; i < TEMP_STEPS; i++) {		// Go through eeprom.uspb[]
+		if (curSmoothing[i] <= TGT_SMOOTHING) { //  and mark the ones we're not done calibrating by
+			eeprom.uspb[i] = -eeprom.uspb[i];	//  negating them
+		}
+	}
 	eeprom_write_block((const void*)&eeprom, (void*)0, sizeof(eeprom)); // Write it to EEPROM
+	for (int i = 0; i < TEMP_STEPS; i++) {		// Go through eeprom.uspb[]
+		if (curSmoothing[i] <= TGT_SMOOTHING) {	//  and restore the ones we negated
+			eeprom.uspb[i] = -eeprom.uspb[i];
+		}
+	}
 }

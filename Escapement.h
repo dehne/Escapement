@@ -38,7 +38,7 @@
 #define TGT_SMOOTHING	(8192)				// Number of beats to run CALIBRATE mode for a given temperature
 
 // Bendulum sensing and and pushing constants
-#define SETTLE_TIME 	(125)				// Time to delay to let things settle before looking for voltage spike (ms)
+#define SETTLE_TIME 	(250)				// Time to delay to let things settle before looking for voltage spike (ms)
 #define DELAY_TIME		(5)					// Time by which to delay the start of the kick pulse (ms)
 #define KICK_TIME		(10)				// Duration of the kick pulse (ms)
 #define INIT_PEAK		(10)				// Initial guess at peakScale during SCALE mode. (Must be less than the actual)
@@ -53,13 +53,12 @@
 
 // EEPROM data structure definition
 struct settings_t {							// Structure of data stored in EEPROM
-	int id;									// ID tag to know whether data (probably) belongs to this sketch
+	unsigned int id;							// ID tag to know whether data (probably) belongs to this sketch
 	int bias;								// Empirically determined correction factor for the real-time clock in 0.1 s/day
 	int peakScale;							// Empirically determined scaling factor for peak induced voltage
 	long deltaUspb;							// Speed adjustment factor, μs per beat
 	bool compensated;						// Set to true if the Escapement is temperature compensated, else false
-	long uspb[TEMP_STEPS];					// Empirically determined, temp-dependent, μs per beat.
-	int curSmoothing[TEMP_STEPS];			// Current temp-dependent smoothing factor
+	long uspb[TEMP_STEPS];					// Empirically determined, temp-dependent, μs per beat. <= 0 means 'not valid'
 };
 
 #define SETTINGS_TAG (0xA1CF)               // If this is in eeprom.id, the contents of eeprom is (probably) ours
@@ -69,8 +68,9 @@ private:
 // Instance variables
 	byte sensePin;							// Pin on which we sense the bendulum's passing
 	byte kickPin;							// Pin on which we kick the bendulum as it passes
-	int cycleCounter;						// Current cycle counter for SETTLING and SCALING modes
+	int beatCounter;						// Counts beats during WARMSTART mode
 	settings_t eeprom;						// Contents of EEPROM -- our persistent parameters
+	int curSmoothing[TEMP_STEPS];			// Current temp-dependent smoothing factor
 	int tempIx;								// Temperature index (0 <= tempIx < TEMP_STEPS). -1 if none
 	int lastTempIx;							// Temperature index last time we calculated it
 	boolean tick;							// Whether currently awaiting a tick or a tock
@@ -81,6 +81,7 @@ private:
 	byte runMode;							// Run mode -- SETTLING, CALIBRATING or RUNNING
 // Utility methods
 	int getTempIx();						// Get the current temperature index
+											// Get and set bits in int array
 	boolean readEEPROM();					// Read EEPROM into instance variables
 	void writeEEPROM();						// Write EEPROM from instance variables
 
@@ -88,10 +89,10 @@ public:
 // Constructors
 	Escapement(byte sensePin = A2, byte kickPin = 12);  // Escapement on specified sense and kick pins
 // Operational methods
-	void enable(byte initialMode = RUN);	// Do initialization of Escapement that needs to be done in startup()
+	void enable(byte initialMode = RUN);	// Do initialization of Escapement that needs to be done in sketch startup()
 	long beat();							// Do one beat (half a cycle) return  length of a beat in μs
 // Getters and setters
-	int getCycleCounter();					// Get the number of cycles in the current mode (except RUNNING)
+	int getbeatCounter();					// Get the number of cycles in the current mode (except RUNNING)
 	long getBias();							// Get Arduino clock correction in tenths of a second per day
 	void setBias(long factor);				// Set Arduino clock correction in tenths of a second per day
 	long incrBias(long factor);				// Increment Arduino clock correction by factor tenths of a second per day
@@ -99,6 +100,7 @@ public:
 	void setPeakScale(int scaleFactor);		// Set the peak induced voltage scaling factor
 	float getTemp();						// Get the current temperature in C; -1 if none
 	boolean isTick();						// True if the last beat was a "tick" false if it was a "tock"
+	boolean isTempComp();					// True if temperature compensated
 	float getAvgBpm();						// Get the average beats per minute
 	float getCurBpm();						// Get the current beats per minute
 	float getDelta();						// Get the current ratio of tick length to tock length
