@@ -1,5 +1,5 @@
 #
-# Syntax coloring map for Escapement
+# Syntax coloring map for Escapement v0.3
 #
 
 #
@@ -13,20 +13,22 @@ Escapement	KEYWORD1
 enable	KEYWORD2
 beat	KEYWORD2
 cycle	KEYWORD2
-getCycleCounter	KEYWORD2
+getBeatCounter	KEYWORD2
+getBias	KEYWORD2
+setBias	KEYWORD2
+incrBias	KEYWORD2
 getTgtSettle	KEYWORD2
 setTgtSettle	KEYWORD2
 getTgtSmoothing	KEYWORD2
 setTgtSmoothing	KEYWORD2
-getBias	KEYWORD2
-setBias	KEYWORD2
-incrBias	KEYWORD2
 getPeakScale	KEYWORD2
 setPeakScale	KEYWORD2
 getTemp	KEYWORD2
 isTick	KEYWORD2
+isTempComp	KEYWORD2
 getAvgBpm	KEYWORD2
 getCurBpm	KEYWORD2
+getBeatBpm	KEYWORD2
 getDelta	KEYWORD2
 getBeatDuration	KEYWORD2
 getBeatDelta	KEYWORD2
@@ -38,8 +40,9 @@ setRunMode	KEYWORD2
 #
 # Literals
 #
-SETTLING	LITERAL1
-SCALING	LITERAL1
-CALIBRATING	LITERAL1
+COLDSTART	LITERAL1
+WARMSTART	LITERAL1
+CALIBRATE	LITERAL1
 CALFINISH	LITERAL1
-RUNNING	LITERAL1
+RUN	LITERAL1
+CALRTC	LITERAL1
