@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.5
+ *   Part of the "Escapement" library for Arduino. Version 0.6
  *
  *   Escapement.cpp Copyright 2014-2015 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -51,34 +51,29 @@
  *   temperature-compensate the ticking pendulum or bendulum. It works like this.
  *
  *   When the Escapement is started by the enable() method, it attempts to read its persistent parameters from EEPROM.
- *   If this is successful and the data looks good, the mode is set to RUN, accomplishing a "hot start." If the read 
- *   is good, but there's not good calibration information, a "warm start" is assumed. A warm start uses the value of 
- *   Arduino real-time clock correction, eeprom.bias, but otherwise starts the calibration process from scratch by 
- *   entering WARMSTART mode. If neither of these applies, the Escapement does a "cold start" by entering COLDSTART 
- *   mode. A cold start sets the Arduino real-time clock to zero and then enters WARMSTART mode. Thus, a cold start 
- *   assumes that the Arduino real-time clock is accurate, which it probably isn't. But you can calibrate the Arduino
- *   real-time clock, as you'll see, below.
+ *   Depending on what it finds, the Escapement enters one of three run modes.
  *
- *   To cause the Escapement to ignore the persistent parameters in EEPROM and start from scratch, invoke the
- *   enable(COLDSTART) method instead of enable().
+ *   WARMSTART is entered if good calibration data is read and temperature sensing hasn't been added or removed from 
+ *   the configuration since the data was written. With a WARMSTART, the Escapement runs using the corrected Arduino 
+ *   clock as a time reference for TGT_WARMUP beats. It then transitions to RUN mode.
  *
- *   Cold starting only lasts one beat and is used to reset the real-time clock correction to zero and mark the eeprom 
- *   structure as having no valid content. Once that is done the Escapement enters WARMSTART mode. During COLDSTART 
- *   mode, the duration beat() returns is measured using the (corrected) Arduino real-time clock.
+ *   COLDSTART is entered if good calibration data can't be read or if it is forced by enable()'s initialMode parameter.
+ *   In this mode all of the calibration data, including the Arduino clock's correction data is reset and then WARMSTART 
+ *   mode is entered.
  *
- *   Except during hot start, the Escapement object quickly enters WARMSTART mode. It continues in  this mode for
- *   TGT_WARMUP beats. During WARMSTART mode, we just run for a while before starting calibration. During WARMSTART 
- *   mode, the duration beat() returns is measured using the (corrected) Arduino real-time clock.
+ *   CALSTART is entered if good calibration data is read but temperature sensing has been added or removed. In this 
+ *   mode, the calibration information, but not the Arduino clock's correction data is reset and then WARMSTART mode is 
+ *   entered.
  *
- *   With WARMSTART over, the Escapement object moves either CALRTC or to CALIBRATE mode, depending on whether the 
- *   Arduino's EEPROM has valid content. If it does not, we enter CALRTC mode to calibrate the Arduino real-time 
- *   clock. Otherwise, we transition to CALIBRATE mode.
+ *   Once entered, RUN mode persists so long as the calibration for the current temperature has been completed. If it 
+ *   has not, the Escapement object switches to CALIBRATE mode. During RUN mode, beat() returns the linear 
+ *   interpolation of the two calibration points nearest the current temperature.
  *
  *   CALIBRATE mode lasts for TGT_SMOOTHING beats in each of TEMP_STEPS half-degree C "buckets" of temperature. 
  *   Buckets are indexed by the variable tempIX. The lowest temperature at which calibration is done is MIN_TMP. This 
  *   first bucket, like all the buckets runs for a half degree C. The highest temperature bucket starts at MIN_TEMP + 
  *   (TEMP_STEPS - 1) / 2. Calibration information is not collected for temperatures outside this range. If 
- *   temperature readings are not available, temperature compensation cannot be done and only the first bucket is used.
+ *   temperature sensing is not available, temperature compensation cannot be done and only the first bucket is used.
  *
  *   If, during calibration, the temperature changes enough to fall into a different "bucket" before TGT_SMOOTHING 
  *   beats pass, the progress made in calibrating for the old temperature bucket is maintained in eeprom.uspb[] and 
@@ -95,16 +90,10 @@
  *   to RUN mode. In CALFINISH mode, the duration beat() returns is measured using the (corrected) Arduino real-time 
  *   clock.
  *
- *   RUN mode persists so long as the temperature stays within the the same bucket. If the temperature changes enough 
- *   to fall into a different temperature bucket, and calibration for that bucket new temperature has not been 
- *   completely calculated, the Escapement object switches to CALIBRATE mode. During RUN mode, beat() returns 
- *   the linear interpolation of the two calibration points nearest the current temperature.
- *
- *   The net effect is that the Escapement object automatically characterizes the bendulum or pendulum it is driving,
- *   first by measuring the strength of the pulses the passing magnet induces in the coil. Second by determining the 
- *   average duration of the beats at half-degree intervals as it encounters different temperatures. Finally, once the 
- *   calibration is done for a given temperature range, it assumes the bendulum or pendulum behaves linearly with
- *   temperature between calibration points.
+ *   The net effect is that the Escapement object automatically characterizes the bendulum or pendulum it is driving 
+ *   by determining the average duration of the beats at half-degree intervals as it encounters different temperatures. 
+ *   Once the calibration is done for a given temperature range, it assumes the bendulum or pendulum behaves linearly 
+ *   with temperature between calibration points.
  *
  *   This would work nearly perfectly except that, as hinted at above, the real-time clock in most Arduinos is stable 
  *   but not too accurate (it's a ceramic resonator, not a crystal). That is, real-time clock ticks are essentially 
@@ -155,7 +144,8 @@ void Escapement::enable(byte initialMode) {
 											//   induced current doesn't flow to ground
 	Wire.begin();							// Prep to talk to the TMP102 temperature sensor
 	beatCounter = 1;						// Initialize beatCounter
-	lastTemp = temp = readTemp();			// Initialize the temperature variables
+	lastTemp = NO_TEMP;						// No lastTemp
+	temp = readTemp();						//   but there is a temp
 	tempIx = getTempIx(temp);
 	tick = true;							// Whether currently awaiting a tick or a tock
 	tickLength = tockLength = 0;			// Length of last tick and tock periods (μs)
@@ -166,9 +156,9 @@ void Escapement::enable(byte initialMode) {
 		if (readEEPROM()) {					//   Try getting info from EEPROM. If that works
 			if ((temp != NO_TEMP) == eeprom.compensated) {
 											//      If temp compensation mode matches
-				setRunMode(RUN);			//		  Start in RUN mode
+				setRunMode(WARMSTART);		//		  Start in WARMSTART mode
 			} else {
-				setRunMode(WARMSTART);		//      Otherwise start in WARMSTART mode
+				setRunMode(CALSTART);		//      Otherwise start in CALSTART mode
 			}
 		} else {							//   Else (invalid data in EEPROM)
 			setRunMode(COLDSTART);			//     Cold start
@@ -236,7 +226,7 @@ long Escapement::beat(){
 
 	switch (runMode) {
 		case COLDSTART:							// When cold starting
-			setRunMode(WARMSTART);				//   Just switch to WARMSTART mode
+			setRunMode(WARMSTART);				//   eeprom.* has already been set to default so switch to CALSTART mode
 			break;
 		case WARMSTART:							// When warmstarting
 			if (tick) {							//   If tick, remember tickLength
@@ -245,8 +235,11 @@ long Escapement::beat(){
 				tockLength = deltaT;
 			}
 			if (++beatCounter > TGT_WARMUP) {
-				setRunMode(CALIBRATE);			//   If just did the warm-up switch from WARMSTART to CALIBRATE
+				setRunMode(RUN);				//   If just did the warm-up switch from WARMSTART to RUN
 			}
+			break;
+		case CALSTART:							// When starting a calibration,
+			setRunMode(WARMSTART);				//   Begin by warming up to be sure everything is settled
 			break;
 		case CALIBRATE:							// When doing calibration
 			if (tempIx == NO_CAL) break;		//   If not in calibration temp range, don't try doing it
@@ -397,12 +390,13 @@ float Escapement::getAvgBpm(){
 				  eeprom.uspb[tempIx] + eeprom.deltaUspb);
 }
 
-// Get current beats per minute as measured by the real-time clock
+// Get current beats per minute as measured by the (corrected) real-time clock
 float Escapement::getCurBpm(){
 	unsigned long diff;
 	if (lastTime == 0 || timeBeforeLast == 0) return 0;
 	diff = lastTime - timeBeforeLast;
-	return 60000000.0 / (diff + eeprom.deltaUspb + ((eeprom.bias * diff) + 432000) / 864000);
+	diff += ((eeprom.bias * diff) + 432000) / 864000;
+	return 60000000.0 / diff;
 }
 
 // Get the value last returned by beat() converted to bpm
@@ -444,21 +438,20 @@ byte Escapement::getRunMode(){
 }
 void Escapement::setRunMode(byte mode){
 	switch (mode) {
-		case COLDSTART:							//   Switch to cold starting mode
-			eeprom.id = 0;						//     Say eeprom not written
-			eeprom.bias = 0;					//     and rtc correction (tenths of a second per day) is zero
-#ifdef DEBUG
-			eeprom.bias = 794;					//     Debug: Put empirically determined bias here if you have one else 0
-#endif
+		case COLDSTART:								//   Switch to cold starting mode
+			eeprom.id = 0;							//     Say eeprom not written
+			eeprom.bias = 0;						//     and rtc correction (tenths of a second per day) is zero
 			break;
-		case WARMSTART:							//   Switch to warm starting mode
-			beatCounter = 1;					//     Reset cycle counter
-			eeprom.compensated = temp != NO_TEMP;
-			eeprom.deltaUspb = 0;				//     Default clock speed adjustment
+		case WARMSTART:								//   Switch to warm starting mode
+			beatCounter = 1;						//     Reset cycle counter
+			break;
+		case CALSTART:								//   Switch to starting a new calibration run
+			eeprom.compensated = temp != NO_TEMP;	//     Choose the calibration model: temp compensated or not
+			eeprom.deltaUspb = 0;					//     Default the clock speed adjustment
 			for (int i = 0; i < TEMP_STEPS; i++) {
-				eeprom.uspb[i] = 0;				//     Wipe out old calibration info, if any
+				eeprom.uspb[i] = 0;					//     Wipe out old calibration info, if any
 				eeprom.curSmoothing[i] = 1;
-			}									//     Default eeprom.deltaUspb and eeprom.deltaSmoothing
+			}
 			break;
 		case CALIBRATE:							//   Switch to basic calibration mode
 			break;

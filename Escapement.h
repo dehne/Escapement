@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.5
+ *   Part of the "Escapement" library for Arduino. Version 0.6
  *
  *   Escapement.h Copyright 2014-2015 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -28,20 +28,21 @@
 // Run mode constants
 #define COLDSTART		(0)
 #define WARMSTART		(1)
-#define CALIBRATE		(2)
-#define CALFINISH   	(3)
-#define RUN				(4)
-#define CALRTC			(5)
+#define CALSTART		(2)
+#define CALIBRATE		(3)
+#define CALFINISH   	(4)
+#define RUN				(5)
+#define CALRTC			(6)
 
 // Mode run length constants
-#define TGT_WARMUP		(1024)				// Number of beats to run WARMSTART mode before starting calibration
+#define TGT_WARMUP		(1024)				// Number of beats to run in WARMSTART mode
 #define TGT_SMOOTHING	(8192)				// Number of beats to run CALIBRATE mode for a given temperature
 
 // Bendulum sensing and and pushing constants
 #define SETTLE_TIME 	(250)				// Time to delay to let things settle before looking for voltage spike (ms)
-#define N_SAMPLES		(32)				// Number of samples to average in reading the coil voltage (<= 64 so no o'flow)
+#define N_SAMPLES		(48)				// Number of samples to average in reading the coil voltage (<= 64 so no o'flow)
 #define DELAY_TIME		(0)					// Time by which to delay the start of the kick pulse (ms)
-#define KICK_TIME		(7)					// Duration of the kick pulse (ms). Try 10 for a pendulum, 35 for a bendulum
+#define KICK_TIME		(25)				// Duration of the kick pulse (ms). Try 7 for a pendulum, 35 for a bendulum
 #define NOISE_SIZE		(10)				// Assumed size of the noise in coil readings
 
 // Other constants
