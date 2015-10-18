@@ -1,6 +1,6 @@
 # The "Escapement" library for Arduino
 
-Escapement Library Copyright 2014 by D. L. Ehnebuske 
+Escapement Library Copyright 2014 - 2015 by D. L. Ehnebuske 
 License terms: [Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US)]
 (http://creativecommons.org/licenses/by-sa/3.0/us/ "CC BY-SA 3.0 US")
 
@@ -50,44 +50,49 @@ The beat() method has several operational modes that, together operate as a stat
 temperature-compensate the ticking pendulum or bendulum. It works like this.
 
 When the Escapement is started by the enable() method, it attempts to read its persistent parameters from EEPROM.
-If this is successful and the data looks good, the mode is set to RUN, accomplishing a "hot start." If the read 
-is good, but there's not good calibration information, a "warm start" is assumed. A warm start uses the value of 
-Arduino real-time clock correction, eeprom.bias, but otherwise starts the calibration process from scratch by 
-entering WARMSTART mode. If neither of these applies, the Escapement does a "cold start" by entering COLDSTART 
-mode. A cold start sets the Arduino real-time clock to zero and then enters WARMSTART mode. Thus, a cold start 
-assumes that the Arduino real-time clock is accurate, which it probably isn't.
+Depending on what it finds, the Escapement enters one of three run modes.
 
-To cause the Escapement to ignore the persistent parameters in EEPROM and start from scratch, invoke the
-enable(COLDSTART) method instead of enable().
+WARMSTART is entered if good calibration data is read and temperature sensing hasn't been added or removed from 
+the configuration since the data was written. With a WARMSTART, the Escapement runs using the corrected Arduino 
+clock as a time reference for TGT_WARMUP beats. It then transitions to RUN mode.
 
-Cold starting only lasts one beat and is used to reset the real-time clock correction to zero. Once that id done 
-the Escapement enters WARMSTART mode.
+COLDSTART is entered if good calibration data can't be read or if it is forced by enable()'s initialMode parameter.
+In this mode all of the calibration data, including the Arduino clock's correction data is reset and then WARMSTART 
+mode is entered.
 
-Except during hot start, the Escapement object quickly enters WARMSTART mode. It continues in  this mode 
-TGT_SCALE cycles. (A cycle is two beats.) During WARMSTART mode, the peak voltage induced in the coil by the 
-passing magnet is determined and saved in eeprom.peakScale. During WARMSTART mode, the duration beat() returns is 
-measured using the (corrected) Arduino real-time Clock.
+CALSTART is entered if good calibration data is read but temperature sensing has been added or removed. In this 
+mode, the calibration information, but not the Arduino clock's correction data is reset and then WARMSTART mode is 
+entered.
 
-With WARMSTART over, the Escapement object moves to CALIBRATE mode, in which it remains for TGT_SMOOTHING 
-additional cycles of equal temperature. If the temperature changes before TGT_SMOOTHING cycles pass, whatever 
-progress has been made on calibrating for the old temperature is maintained, and calibration at the new 
-temperature is started or, if partial calibration at that temperature has been done earlier, resumed. During 
-CALIBRATE mode, the average duration of tick and tock beats is measured and saved in tickAvg, tockAvg and their 
-average is saved in eeprom.uspb[tempiX]. When calibration for the current temperature completes TGT_SMOOTHING 
-cycles, the Escapement object stores the contents of eeprom -- Escapement's persistent parameters -- in the 
-Arduino's EEPROM and switches to CALFINISH mode. During CALIBRATE mode, beat() returns eeprom.uspb[tempIx].
+Once entered, RUN mode persists so long as the calibration for the current temperature has been completed. If it 
+has not, the Escapement object switches to CALIBRATE mode. During RUN mode, beat() returns the linear 
+interpolation of the two calibration points nearest the current temperature.
 
-The CALFINISH mode serves as notice to the using sketch that calibration for the current temperature is complete. 
-The Escapement object then switches to RUN mode. In CALFINISH mode, beat() returns eeprom.uspb[tempix].
+CALIBRATE mode lasts for TGT_SMOOTHING beats in each of TEMP_STEPS half-degree C "buckets" of temperature. 
+Buckets are indexed by the variable tempIX. The lowest temperature at which calibration is done is MIN_TMP. This 
+first bucket, like all the buckets runs for a half degree C. The highest temperature bucket starts at MIN_TEMP + 
+(TEMP_STEPS - 1) / 2. Calibration information is not collected for temperatures outside this range. If 
+temperature sensing is not available, temperature compensation cannot be done and only the first bucket is used.
 
-RUN mode persists so long as the temperature stays the same. If the temperature changes, and calibration for the  
-new temperature has not been completely calculated, the Escapement object switches to CALIBRATE mode. During RUN 
-mode, beat() returns eeprom.uspb[tempIx].
+If, during calibration, the temperature changes enough to fall into a different "bucket" before TGT_SMOOTHING 
+beats pass, the progress made in calibrating for the old temperature bucket is maintained in eeprom.uspb[] and 
+eeprom.curSmoothing[], and calibration at the new temperature bucket is started or, if partial calibration for at 
+that temperature bucket has been done earlier, resumed. During CALIBRATE mode, the duration the beats is measured 
+and used to adjust the calibration values for the tempIx and the tempIx + 1 buckets When calibration for either 
+the tempIx or  the tempIx + 1 buckets completes TGT_SMOOTHING beats, the Escapement object stores the contents of 
+eeprom -- Escapement's persistent parameters -- in the Arduino's EEPROM and switches to CALFINISH mode. During 
+CALIBRATE mode, the duration beat() returns is measured using the (corrected) Arduino real-time clock.
 
-The net effect is that the Escapement object automatically characterizes the bendulum or pendulum it is driving,
-first by measuring the strength of the pulses the passing magnet induces in the coil and second by measuring the 
-average duration of the beat at each temperatures encountered. Once the measurements are done for a given 
-temperature, the Escapement assumes the bendulum or pendulum is isochronous at that temperature.
+The CALFINISH mode does two things. First, it serves as notice to the using sketch that calibration for the 
+current temperature bucket is complete. And second, it uses the currently accumulated calibration information to
+least-squares fit model of the length of a beat as a function of temperature. The Escapement object then switches 
+to RUN mode. In CALFINISH mode, the duration beat() returns is measured using the (corrected) Arduino real-time 
+clock.
+
+The net effect is that the Escapement object automatically characterizes the bendulum or pendulum it is driving 
+by determining the average duration of the beats at half-degree intervals as it encounters different temperatures. 
+Once the calibration is done for a given temperature range, it assumes the bendulum or pendulum behaves linearly 
+with temperature between calibration points.
 
 This would work nearly perfectly except that, as hinted at above, the real-time clock in most Arduinos is stable 
 but not too accurate (it's a ceramic resonator, not a crystal). That is, real-time clock ticks are essentially 
@@ -98,9 +103,9 @@ Positive eeprom.bias means the real-time clock's "microseconds" are shorter than
 real-time clock is the standard that's used for calibration, automatic calibration won't work well unless 
 eeprom.bias is set correctly. To help with setting eeprom.bias Escapement has one more mode: CALRTC.
 
-In CALRTC, the duration beat() returns is value measured by the (corrected) Arduino real-time Clock. It persists 
-until changed with setRunMode(). Because the value returned is the RTC-measured value, in this mode the 
-Escapement is effectively driven by the RTC, not the pendulum or bendulum, despite the ticking and tocking. The 
-idea is to use the mode to adjust the RTC calibration (via the setBias() and incrBias() methods) so that the 
-clock driven by the Escapement keeps perfect time. Once the real-time clock is calibrated, entering WARMSTART 
-mode should produce a good automatic calibration.
+In CALRTC mode, the duration beat() returns is the value measured by the (corrected) Arduino real-time clock. The  
+CALRTC mode persists until changed by setRunMode(). Because the value returned is the real-time-clock-measured 
+value, in this mode the Escapement is effectively driven by the real-time clock, not the pendulum or bendulum, 
+despite its ticking and tocking. The idea is to use the mode to adjust the real-time clock calibration (via the 
+setBias() and incrBias() methods) so that the clock driven by the Escapement keeps perfect time. Once the real-
+time clock is calibrated, entering CALIBRATE mode should produce a good automatic calibration.
