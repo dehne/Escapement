@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.6
+ *   Part of the "Escapement" library for Arduino. Version 0.8
  *
  *   Escapement.cpp Copyright 2014-2015 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -70,19 +70,24 @@
  *   interpolation of the two calibration points nearest the current temperature.
  *
  *   CALIBRATE mode lasts for TGT_SMOOTHING beats in each of TEMP_STEPS half-degree C "buckets" of temperature. 
- *   Buckets are indexed by the variable tempIX. The lowest temperature at which calibration is done is MIN_TMP. This 
- *   first bucket, like all the buckets runs for a half degree C. The highest temperature bucket starts at MIN_TEMP + 
- *   (TEMP_STEPS - 1) / 2. Calibration information is not collected for temperatures outside this range. If 
- *   temperature sensing is not available, temperature compensation cannot be done and only the first bucket is used.
+ *   Buckets are indexed by the variable tempIx. The 0th bucket is centered on MIN_TMP. This bucket, like all the 
+ *   buckets runs for a half degree C. The highest temperature bucket is centered at MIN_TEMP + (TEMP_STEPS - 1) / 2. 
+ *   Calibration information is not collected for temperatures outside this range. If temperature sensing is not 
+ *   available, temperature compensation cannot be done and only the 0th bucket is used.
  *
- *   If, during calibration, the temperature changes enough to fall into a different "bucket" before TGT_SMOOTHING 
+ *   For each bucket there are two pieces of information, eeprom.uspb[] and eeprom.curSmoothing[]. The first, 
+ *   eeprom.uspb[] is the average beat duration (in microseconds) at the temperature of that bucket. The second, 
+ *   eeprom.curSmoothing[], is the number of samples that went into the average so far. Calibration consists of
+ *   accumulating TGT_SMOOTHING samples. A sample is accumulated if the temperature is within 1/8 degree C of the
+ *   temperature of the bucket when the beat takes place.
+ *
+ *   If, during calibration, the temperature changes enough to fall into a different bucket before TGT_SMOOTHING 
  *   beats pass, the progress made in calibrating for the old temperature bucket is maintained in eeprom.uspb[] and 
  *   eeprom.curSmoothing[], and calibration at the new temperature bucket is started or, if partial calibration for at 
- *   that temperature bucket has been done earlier, resumed. During CALIBRATE mode, the duration the beats is measured 
- *   and used to adjust the calibration values for the tempIx and the tempIx + 1 buckets When calibration for either 
- *   the tempIx or  the tempIx + 1 buckets completes TGT_SMOOTHING beats, the Escapement object stores the contents of 
- *   eeprom -- Escapement's persistent parameters -- in the Arduino's EEPROM and switches to CALFINISH mode. During 
- *   CALIBRATE mode, the duration beat() returns is measured using the (corrected) Arduino real-time clock.
+ *   that temperature bucket has been done earlier, resumed. When TGT_SMOOTHING samples have been taken for a bucket, 
+ *   the Escapement object stores the contents of eeprom -- Escapement's persistent parameters -- in the Arduino's 
+ *   EEPROM and switches to CALFINISH mode. During CALIBRATE mode, the duration beat() returns is measured using the 
+ *   (corrected) Arduino real-time clock.
  *
  *   The CALFINISH mode does two things. First, it serves as notice to the using sketch that calibration for the 
  *   current temperature bucket is complete. And second, it uses the currently accumulated calibration information to
@@ -243,13 +248,10 @@ long Escapement::beat(){
 			break;
 		case CALIBRATE:							// When doing calibration
 			if (tempIx == NO_CAL) break;		//   If not in calibration temp range, don't try doing it
-			if (tempIx != getTempIx(lastTemp)) {
-												//   If not the same temperature index as last time
-				if (eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
-												//     If new temp index is already calibrated
-					setRunMode(RUN);			//       Switch to RUN mode
-					break;
-				}
+			if (eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
+												//   If temp index is already calibrated
+				setRunMode(RUN);				//     Switch to RUN mode
+				break;
 			}
 			if (!eeprom.compensated) {			// If not temperature compensated
 				eeprom.uspb[tempIx] += (deltaT - eeprom.uspb[tempIx]) / eeprom.curSmoothing[tempIx];
@@ -264,43 +266,22 @@ long Escapement::beat(){
  *
  *			Temperature-compensated calibration model
  *
- *			Each of the tempIx buckets is our best guess for the beat duration at temperature t(tempIx) (in degrees 
- *			C * 256) where t(tempIx) = tempIx * 128 + TEMP_MIN * 256.
- *
- *			At each beat, the temperature and the beat duration are measured. In a Cartesian system where x is temp 
- *			and y is beat duration, the vertical distance between (temp, deltaT) and the line connecting the points 
- *			(t(tempIx), uspb[tempIx]) and (t(tempIx + 1), uspb[tempIx + 1]) is calculated as the error, e. The 
- *			quantity e is then apportioned between uspb[tempIx] and uspb[tempIx + 1] in proportion to the fraction of
- *			the distance, p, that temp is from t(tempIx) to t(tempIx + 1). The apportioned error is used to adjust the 
- *			running averages in uspb[tempIx] and uspb[tempIx + 1], thus updating the model. But we only attribute the
- *          error to an end point if the current temperature is not too far away from the temperature the end point
- *          represents.
+ *			Each of the tempIx buckets is the average beat duration at temperature t(tempIx) in degrees Celsius * 256)
+ *			where t(tempIx) = tempIx * 128 + TEMP_MIN * 256. If the current temperature corresponds to one of the buckets
+ *			(i.e., it falls within 1/8 degree of one of the half-degree intervals), the running average is updated with 
+ *			the current measured duration. If the current temperature falls somewhere else, nothing is done.
  *
  ****/
-	//							   <---------- slope: (y2 - y1) / (x2 - x1) ----------> * (temp - t(tempIx))
-				float e = deltaT - ((eeprom.uspb[tempIx+1] - eeprom.uspb[tempIx])/128.0 *   (temp & 0x7f)    + eeprom.uspb[tempIx]);
-				float p = (float)(temp & 127) / 128;
-				if (eeprom.curSmoothing[tempIx] <= TGT_SMOOTHING) {
-					if (eeprom.curSmoothing[tempIx] == 1) {
-						eeprom.uspb[tempIx] = deltaT;		// Initial sample
-						eeprom.curSmoothing[tempIx]++;
-					} else if (p <= 0.6) {
-						eeprom.uspb[tempIx] += e * (1 - p) / eeprom.curSmoothing[tempIx]++;
+
+				if(abs(temp - ((tempIx << 7) + (TEMP_MIN << 8))) <= 32) {
+													// If current temp matches a tempIx bucket to with 1/8 degree C
+					eeprom.uspb[tempIx] += (deltaT - eeprom.uspb[tempIx]) / eeprom.curSmoothing[tempIx];
+													//   Update running average
+					if (++eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
+													//   If just reached a full smoothing interval
+						writeEEPROM();				//     Make calibration parms persistent
+						setRunMode(CALFINISH);		//     Switch to CALFINISH mode
 					}
-				}
-				if (eeprom.curSmoothing[tempIx + 1] <= TGT_SMOOTHING) {
-					if (eeprom.curSmoothing[tempIx + 1] == 1) {
-						eeprom.uspb[tempIx + 1] = deltaT;	// Initial sample
-						eeprom.curSmoothing[tempIx + 1]++;
-					} else if (p >= 0.4) {
-						eeprom.uspb[tempIx + 1] += e * (1 - p) / eeprom.curSmoothing[tempIx + 1]++;
-					}
-				}
-				
-				if (eeprom.curSmoothing[tempIx] > TGT_SMOOTHING && eeprom.curSmoothing[tempIx + 1] > TGT_SMOOTHING) {
-													//   If just reached a full smoothing interval for both 
-					writeEEPROM();					//     Make calibration parms persistent
-					setRunMode(CALFINISH);			//     Switch to CALFINISH mode
 				}
 			}
 			break;
@@ -310,18 +291,32 @@ long Escapement::beat(){
 		case RUN:								// When running
 			if (!eeprom.compensated) {			//   If not temperature-compensated
 				deltaT = eeprom.uspb[tempIx] + eeprom.deltaUspb;
-												//     deltaT is the calibration value plus the manual correction, if any
+												//     deltaT is the calibration value plus the manual correction
 				break;							//     Done!
 			}
 			// Temperature-compensated model
 			if (tempIx != NO_CAL) {				//   If within calibrated temp range
-				if (eeprom.curSmoothing[tempIx] <= TGT_SMOOTHING || eeprom.curSmoothing[tempIx + 1] <= TGT_SMOOTHING){
-					setRunMode(CALIBRATE);		//     If should be calibrating,
-				}								//       switch to CALIBRATE mode for next beat
-//						 <--------- slope: (y2 - y1) / (x2 - x1) ----------> * (temp - t(tempIx))
-				deltaT = (eeprom.uspb[tempIx+1] - eeprom.uspb[tempIx])/128.0 *   (temp & 0x7f) + 
-				  eeprom.uspb[tempIx] + eeprom.deltaUspb;
-												//     deltaT is the value from model plus the manual correction, if any
+				int deltaTemp = temp - ((TEMP_MIN + tempIx) << 8);
+												//     deltaTemp = temp - t(tempIx)
+				if (eeprom.curSmoothing[tempIx] <= TGT_SMOOTHING ||
+					(deltaTemp > 0 && (tempIx + 1 >= TEMP_STEPS || eeprom.curSmoothing[tempIx + 1] <= TGT_SMOOTHING)) ||
+					(deltaTemp < 0 && (tempIx - 1 < 0 || eeprom.curSmoothing[tempIx - 1] <= TGT_SMOOTHING))){
+					setRunMode(CALIBRATE);		//     If the model isn't yet calibrated for this temperature,
+					break;						//       switch to CALIBRATE mode for next beat
+				}
+				if (deltaTemp > 0) {			//   If temp is above t(tempIx)
+//							 <---------- slope: (y2 - y1) / (x2 - x1) -----------> * deltaTemp
+					deltaT = (eeprom.uspb[tempIx + 1] - eeprom.uspb[tempIx])/128.0 * deltaTemp + 
+					eeprom.uspb[tempIx] + eeprom.deltaUspb;
+												//       deltaT is linear interp above [tempIx] plus the manual correction
+				} else if (deltaTemp < 0) {		//   else if temp is below t(tempIx)
+//							 <---------- slope: (y2 - y1) / (x2 - x1) -----------> * deltaTemp
+					deltaT = (eeprom.uspb[tempIx] - eeprom.uspb[tempIx - 1])/128.0 * deltaTemp + 
+					eeprom.uspb[tempIx] + eeprom.deltaUspb;
+												//       deltaT is linear interp below [tempIx] plus the manual correction
+				} else {						//   else temp is equal to t(tempIx)
+					deltaT = eeprom.uspb[tempIx] + eeprom.deltaUspb;
+				}
 			}
 			break;
 		case CALRTC:							// When calibrating the Arduino real-time clock
@@ -341,11 +336,7 @@ long Escapement::beat(){
 
 // Return the current smoothing information for the current temp.
 String Escapement::getSmoothing() {
-	if (eeprom.compensated) {
-		return String(String(eeprom.curSmoothing[getTempIx(temp)]) + " -> " + String(eeprom.curSmoothing[getTempIx(temp) + 1]));
-	} else {
-		return String(eeprom.curSmoothing[getTempIx(temp)]);
-	}
+	return String(eeprom.curSmoothing[getTempIx(temp)]);
 }
  
 // Get, set or increment Arduino clock run rate correction in tenths of a second per day
@@ -378,16 +369,11 @@ boolean Escapement::isTempComp() {
 	return eeprom.compensated;
 }
 
-// Get average beats per minute for the current temperature
+// Get average beats per minute for the current bucket or 0.0 if none
 float Escapement::getAvgBpm(){
-	if (!eeprom.compensated) {
-		return 60000000.0 / (eeprom.uspb[0] + eeprom.deltaUspb);
-	}
-	if (tempIx == NO_CAL || eeprom.uspb[tempIx + 1] == 0) return 60000000.0 / (eeprom.uspb[tempIx] + eeprom.deltaUspb);
-	if (eeprom.uspb[tempIx] == 0) return 60000000.0 / (eeprom.uspb[tempIx + 1] + eeprom.deltaUspb);
+	if (tempIx == NO_CAL || eeprom.uspb[tempIx] + eeprom.deltaUspb == 0) return 0.0;
 	
-	return 60000000.0 / ((eeprom.uspb[tempIx + 1] - eeprom.uspb[tempIx])/128.0 *   (temp & 0x7f) + 
-				  eeprom.uspb[tempIx] + eeprom.deltaUspb);
+	return 60000000.0 / (eeprom.uspb[tempIx] + eeprom.deltaUspb);
 }
 
 // Get current beats per minute as measured by the (corrected) real-time clock
@@ -453,16 +439,16 @@ void Escapement::setRunMode(byte mode){
 				eeprom.curSmoothing[i] = 1;
 			}
 			break;
-		case CALIBRATE:							//   Switch to basic calibration mode
+		case CALIBRATE:								//   Switch to basic calibration mode
 			break;
-		case CALFINISH:							//   Switch to calibration finished mode
+		case CALFINISH:								//   Switch to calibration finished mode
 			break;
-		case RUN:								//   Switch to RUN mode
+		case RUN:									//   Switch to RUN mode
 			break;
-		case CALRTC:							//   Switch to real-time clock calibration mode
+		case CALRTC:								//   Switch to real-time clock calibration mode
 			break;
 	}
-	runMode = mode;								//   Remember new mode
+	runMode = mode;									//   Remember new mode
 }
 
 /*
@@ -496,14 +482,14 @@ int Escapement::readTemp() {
  *
  * Returns 0 if not running temp compensated.
  * if temp is out of range we use for calibration returns NO_CAL
- * If temp is in range, the index returned is the one corresponding to the reading that is less than the temp
- * and the next higher index is always valid
+ * If temp is in range, the index returned is the one corresponding to the reading that is closest to the temp.
+ * The next higher or lower index may not be valid
  *
  */
 int Escapement::getTempIx(int t) {
 	if (!eeprom.compensated) return 0;			// If not temp compensated, index is always 0
-	t = (t / 128)  - (2 * TEMP_MIN);			// Convert t to index
-	if (t >= 0 && t < TEMP_STEPS - 1) {			// If within limits
+	t = ((t + 64) / 128)  - (2 * TEMP_MIN);		// Convert t to index
+	if (t >= 0 && t < TEMP_STEPS) {				// If within limits
 		return t;								//   Return the index
 	}
 	return NO_CAL;								// If out of range index is NO_CAL

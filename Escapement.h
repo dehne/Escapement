@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.6
+ *   Part of the "Escapement" library for Arduino. Version 0.8
  *
  *   Escapement.h Copyright 2014-2015 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -40,9 +40,9 @@
 
 // Bendulum sensing and and pushing constants
 #define SETTLE_TIME 	(250)				// Time to delay to let things settle before looking for voltage spike (ms)
-#define N_SAMPLES		(48)				// Number of samples to average in reading the coil voltage (<= 64 so no o'flow)
-#define DELAY_TIME		(0)					// Time by which to delay the start of the kick pulse (ms)
-#define KICK_TIME		(25)				// Duration of the kick pulse (ms). Try 7 for a pendulum, 35 for a bendulum
+#define N_SAMPLES		(35)				// Number of samples to average in reading the coil voltage (<= 64 so no o'flow)
+#define DELAY_TIME		(1)					// Time by which to delay the start of the kick pulse (ms)
+#define KICK_TIME		(9)					// Duration of the kick pulse (ms). Try 5-10 for a pendulum, 20-30 for a bendulum
 #define NOISE_SIZE		(10)				// Assumed size of the noise in coil readings
 
 // Other constants
@@ -50,8 +50,8 @@
 #define NO_TEMP			(0xfc80)			// Value of readTemp() when no temp reading available (=-56 degrees C)
 #define NO_CAL			(-1)				// Value of getTempIx() when temperature is out of calibration temperature range
 #define ABS_ZERO		(-273.15)			// Value of getTemp() when no temp reading available
-#define TEMP_MIN		(16)				// Minimum temp we calibrate with (degrees C)
-#define TEMP_STEPS		(30)				// Number of 0.5C steps we keep track of
+#define TEMP_MIN		(18)				// Minimum temp we calibrate with (degrees C)
+#define TEMP_STEPS		(16)				// Number of 0.5C steps we keep track of
 
 // EEPROM data structure definition
 struct settings_t {							// Structure of data stored in EEPROM
