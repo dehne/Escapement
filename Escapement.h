@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.8
+ *   Part of the "Escapement" library for Arduino. Version 0.85
  *
  *   Escapement.h Copyright 2014-2015 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -23,20 +23,20 @@
 #endif
 
 // Compile-time options; uncomment to enable
-// #define DEBUG
+//#define DEBUG
 
 // Run mode constants
 #define COLDSTART		(0)
 #define WARMSTART		(1)
-#define CALSTART		(2)
-#define CALIBRATE		(3)
-#define CALFINISH   	(4)
+#define CALIBRATE		(2)
+#define COLLECT			(3)
+#define MODEL   		(4)
 #define RUN				(5)
 #define CALRTC			(6)
 
 // Mode run length constants
 #define TGT_WARMUP		(1024)				// Number of beats to run in WARMSTART mode
-#define TGT_SMOOTHING	(8192)				// Number of beats to run CALIBRATE mode for a given temperature
+#define TGT_SAMPLES	(8192)				// Number of beats to run COLLECT mode for a given temperature
 
 // Bendulum sensing and and pushing constants
 #define SETTLE_TIME 	(250)				// Time to delay to let things settle before looking for voltage spike (ms)
@@ -51,7 +51,7 @@
 #define NO_CAL			(-1)				// Value of getTempIx() when temperature is out of calibration temperature range
 #define ABS_ZERO		(-273.15)			// Value of getTemp() when no temp reading available
 #define TEMP_MIN		(18)				// Minimum temp we calibrate with (degrees C)
-#define TEMP_STEPS		(16)				// Number of 0.5C steps we keep track of
+#define TEMP_STEPS		(18)				// Number of 0.5C steps we keep track of
 
 // EEPROM data structure definition
 struct settings_t {							// Structure of data stored in EEPROM
@@ -59,8 +59,8 @@ struct settings_t {							// Structure of data stored in EEPROM
 	int bias;								// Empirically determined correction factor for the real-time clock in 0.1 s/day
 	long deltaUspb;							// Speed adjustment factor, μs per beat
 	bool compensated;						// Set to true if the Escapement is temperature compensated, else false
-	long uspb[TEMP_STEPS];					// Empirically determined, temp-dependent, μs per beat.
-	int curSmoothing[TEMP_STEPS];			// Current temp-dependent smoothing factor
+	long uspb[TEMP_STEPS];					// Measured μs per beat averaged over sampleCount samples
+	int sampleCount[TEMP_STEPS];			// Count of samples taken for this temp bucket
 };
 
 #define SETTINGS_TAG (0x3db3)               // If this is in eeprom.id, the contents of eeprom is (probably) ours
@@ -73,14 +73,15 @@ private:
 	int beatCounter;						// In WARMSTART mode, the number of beats since peakScale changed
 	settings_t eeprom;						// Contents of EEPROM -- our persistent parameters
 	int temp;								// Temperature (degrees C * 256)
-	int lastTemp;							// Temperature (degrees C * 256) last time we calculated it
-	boolean tick;							// Whether currently awaiting a tick or a tock
 	long tickLength;						// Duration of last tick (μs)
 	long tockLength;						// Duration of last tock (μs)
-	unsigned long lastTime;					// Real time clock time (μs) last time through beat()
-	unsigned long timeBeforeLast;			// Real time clock time (μs) time before last time through beat()
+	unsigned long topTime;					// Real-time clock time (μs) at time magnet passed over coil
+	unsigned long lastTime;					// topTime last time through beat()
 	long deltaT;							// Holds length of last beat (μs)
+	long yIntercept;						// Linear model of beat duration as a function of temp: y intercept
+	long slope;								// Linear model of beat duration as a function of temp: slope * 4096
 	int tempIx;								// Which "bucket" of temps we're dealing with currently
+	boolean tick;							// Whether currently awaiting a tick or a tock
 	byte runMode;							// Run mode -- SETTLING, CALIBRATING or RUNNING
 // Utility methods
 	int readTemp();							// Read TMP102, return temp in degrees C * 256 or NO_TEMP if unable to read
@@ -95,22 +96,24 @@ public:
 	void enable(byte initialMode = RUN);	// Do initialization of Escapement that needs to be done in sketch startup()
 	long beat();							// Do one beat (half a cycle) return  length of a beat in μs
 // Getters and setters
-	String getSmoothing();					// Get the current smoothing information
+	int getSmoothing();						// Get the current smoothing information
 	long getBias();							// Get Arduino clock correction in tenths of a second per day
 	void setBias(long factor);				// Set Arduino clock correction in tenths of a second per day
 	long incrBias(long factor);				// Increment Arduino clock correction by factor tenths of a second per day
 	float getTemp();						// Get the current temperature in C; -1 if none
 	boolean isTick();						// True if the last beat was a "tick" false if it was a "tock"
 	boolean isTempComp();					// True if temperature compensated
-	float getAvgBpm();						// Get the average beats per minute for the current temperature
-	float getCurBpm();						// Get the current beats per minute as measured by the real-time clock
-	float getBeatBpm();						// Get the duration last returned  by beat() converted to bpm
+	float getBpmModel();					// Get the beats per minute as modeled
+	float getBpmRTC();						// Get the current beats per minute as measured by the real-time clock
+	float getBpmBeat();						// Get the duration last returned  by beat() converted to bpm
 	float getDelta();						// Get the current ratio of tick length to tock length
 	int getBeatCounter();					// Get the number of beats spent in WARMSTART mode
 	long getBeatDuration();					// Get the beat duration in μs
-	long getBeatDelta();					// Get the beat duration delta in μs
-	void setBeatDelta(long beatDelta);		// Set the beat duration delta in μs
-	long incrBeatDelta(long incr);			// Increment beat duration delta so that clock runs faster by incr seconds per day
+	long getBeatDelta();					// Get the beat duration delta (i.e., manual adjustment) in μs/beat
+	void setBeatDelta(long beatDelta);		// Set the beat duration delta (i,e., manual adjustment) in μs/beat
+	long incrBeatDelta(long incr);			// Increment beat duration delta by incr/10 s/day return new value in s/day
+	float getM();							// Get slope of linear least squares model
+	long getB();							// Get yIntercept of linear least squares model
 	byte getRunMode();						// Get the current run mode -- SETTLING, CALIBRATING or RUNNING
 	void setRunMode(byte mode);				// Set the run mode
 };

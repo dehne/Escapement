@@ -1,29 +1,29 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.8
+ *   Part of the "Escapement" library for Arduino. Version 0.85
  *
- *   Escapement.cpp Copyright 2014-2015 by D. L. Ehnebuske 
+ *   Escapement.cpp Copyright 2014-2016 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
  *                  See http://creativecommons.org/licenses/by-sa/3.0/us/ for specifics. 
  *
  *   In pendulum clocks, the escapement is the mechanism that does two things. First, it drives the gear-works one 
- *   step forward for each tick or tock of the pendulum. Second, it gives the pendulum a tiny push with each tick or 
- *   tock to keep the pendulum going. The clock's gear-works are designed to move the clock's hands to display the 
- *   time. The gear ratios in the clock mechanism are such that the fixed duration of time that passes between a tick 
+ *   step forward for each tick or tock of the pendulum. Second, it gives the pendulum a tiny push with each tick and 
+ *   each tock to keep it going. The clock's gear-works are designed to move the clock's hands to display the time. 
+ *   The gear ratios in the clock mechanism are such that the fixed duration of time that passes between a tick 
  *   and a tock (and between a tock and a tick) is exactly correct to have the clocks hands mark the passing of time.
  *
- *   This Escapement library implements the electronic equivalent of an mechanical escapement and gear-works for a 
- *   properly equipped pendulum or bendulum. (A "bendulum" is a long, slender, springy piece of metal, held 
+ *   This Escapement library implements the electronic equivalent of a mechanical escapement and gear-works for a 
+ *   properly equipped pendulum or bendulum. (A "bendulum" is a long, slender, springy piece of material, held 
  *   vertically, whose lower end is fixed and whose upper end has a weight that is free to move back and forth -- a 
- *   sort of upside-down pendulum.) By a "properly equipped" pendulum or bendulum I mean that it terminates in a 
- *   strong magnet that moves across a many-turn coil of fine wire positioned at the center of its swing. 
+ *   sort of upside-down pendulum.) By a "properly equipped" pendulum or bendulum I mean that one that terminates in
+ *   a strong magnet that moves across a many-turn coil of fine wire positioned at the center of its swing. 
  *
  *   The basic idea behind the Escapement is that the motion of the magnet is detected as it passes over the coil by 
  *   the current the magnet induces. Just after the magnet passes, the Escapement object produces a pulse of current 
  *   through the coil. This induces a magnetic field in the coil. The field gives the magnet a small push, keeping the 
- *   pendulum or bendulum going. Each time this happens, the Escapement object returns the stored value for the number 
- *   of microseconds per beat of the pendulum or bendulum it is driving. The returned value can be used to drive a 
- *   time-of-day display.
+ *   pendulum or bendulum going. Each time this happens, the Escapement object returns the number of microseconds 
+ *   that have passed since the last tick or tock. The successively returned values can be used to drive a time-of-day 
+ *   display.
  *
  *   Even carefully designed and built mechanical clocks don't keep perfect time. A major reason for this is that
  *   various properties of the materials from which they are built depend on temperature. For example, the length of 
@@ -40,65 +40,70 @@
  *   =================
  *
  *   Typically, an Escapement object is instantiated as a global in an Arduino sketch. It is then initialized using 
- *   the enable() method in the sketch's setup() function). Finally, the sketch's loop() function repeatedly invokes 
+ *   the enable() method in the sketch's setup() function. Then, the sketch's loop() function repeatedly invokes 
  *   the beat() method. When the magnet passes the coil, beat() returns the number of microseconds that have passed 
  *   since the magnet passed the last time. In this way, the Escapement can be used to drive a time-of-day clock 
  *   display. The Escapement object is able to turn pendulum or bendulum ticks and tocks into microseconds because it 
  *   adjusts to the period of whatever pendulum or bendulum it is driving. It does this through an automatic, 
- *   optionally temperature-compensated calibration process.
+ *   optionally temperature-compensated, calibration process.
  *
- *   The beat() method has several operational modes that, together operate as a state machine to calibrate and 
- *   temperature-compensate the ticking pendulum or bendulum. It works like this.
+ *   The beat() method has several internal operational modes that, together, operate as a state machine to calibrate 
+ *   and temperature-compensate the ticking pendulum or bendulum. It works like this.
  *
  *   When the Escapement is started by the enable() method, it attempts to read its persistent parameters from EEPROM.
- *   Depending on what it finds, the Escapement enters one of three run modes.
- *
- *   WARMSTART is entered if good calibration data is read and temperature sensing hasn't been added or removed from 
- *   the configuration since the data was written. With a WARMSTART, the Escapement runs using the corrected Arduino 
- *   clock as a time reference for TGT_WARMUP beats. It then transitions to RUN mode.
+ *   Depending on what it finds, the Escapement enters one of three operational modes, COLDSTART, WARMSTART, or 
+ *   CALIBRATE.
  *
  *   COLDSTART is entered if good calibration data can't be read or if it is forced by enable()'s initialMode parameter.
  *   In this mode all of the calibration data, including the Arduino clock's correction data is reset and then WARMSTART 
  *   mode is entered.
  *
- *   CALSTART is entered if good calibration data is read but temperature sensing has been added or removed. In this 
+ *   WARMSTART is entered if good calibration data is read and temperature sensing hasn't been added or removed from 
+ *   the configuration since the data was written. With a WARMSTART, the Escapement runs using the corrected Arduino 
+ *   clock as a time reference for TGT_WARMUP beats. It then transitions to MODEL mode.
+ *
+ *   CALIBRATE is entered if good calibration data is read but temperature sensing has been added or removed. In this 
  *   mode, the calibration information, but not the Arduino clock's correction data is reset and then WARMSTART mode is 
- *   entered.
+ *   entered. This mode may be used by the sketch to force a recalibration. In CALIBRATE mode, beat() returns is 
+ *   measured using the (corrected) Arduino real-time clock.
  *
- *   Once entered, RUN mode persists so long as the calibration for the current temperature has been completed. If it 
- *   has not, the Escapement object switches to CALIBRATE mode. During RUN mode, beat() returns the linear 
- *   interpolation of the two calibration points nearest the current temperature.
+ *   MODEL uses the currently collected calibration information, if it exists, to create a least-squares fit model of 
+ *   the length of a beat as a function of temperature. If temperature compensation is not being used, the model is 
+ *   calculated as though we had information on only one temperature. If the information collected is insufficient to 
+ *   create a model, COLLECT mode is entered to collect more data. Once the model is created, the Escapement object 
+ *   switches to RUN mode. In MODEL mode, beat() returns the duration measured using the (corrected) Arduino 
+ *   real-time clock.
  *
- *   CALIBRATE mode lasts for TGT_SMOOTHING beats in each of TEMP_STEPS half-degree C "buckets" of temperature. 
- *   Buckets are indexed by the variable tempIx. The 0th bucket is centered on MIN_TMP. This bucket, like all the 
- *   buckets runs for a half degree C. The highest temperature bucket is centered at MIN_TEMP + (TEMP_STEPS - 1) / 2. 
- *   Calibration information is not collected for temperatures outside this range. If temperature sensing is not 
- *   available, temperature compensation cannot be done and only the 0th bucket is used.
+ *   RUN mode is used for normal operation. During RUN mode, beat() returns the beat length as calculated by the 
+ *   linear least squares model defined during MODEL mode or, if the temperature is outside the model's range, the 
+ *   value measured using the (corrected) Arduino real-time clock. If RUN mode detects that no model has been 
+ *   calculated, it switches to MODEL mode. If it detects that the temperature is one for which we have not completed 
+ *   data collection, it switches to COLLECT mode.
  *
- *   For each bucket there are two pieces of information, eeprom.uspb[] and eeprom.curSmoothing[]. The first, 
+ *   COLLECT mode collects information about the duration of TGT_SAMPLES beats for each of TEMP_STEPS half-degree C 
+ *   "buckets" of temperature. Buckets are indexed by the variable tempIx. The 0th bucket is centered on TEMP_MIN. 
+ *   This bucket, like all the buckets, runs for a half degree C. The highest temperature bucket is centered at 
+ *   TEMP_MIN + (TEMP_STEPS - 1) / 2. Calibration information is not collected for temperatures outside this range. 
+ *   If temperature sensing is not available, temperature compensation cannot be done so the temperature is assumed 
+ *   to always be TEMP_MIN.
+ *
+ *   For each bucket there are two pieces of information, eeprom.uspb[] and eeprom.sampleCount[]. The first, 
  *   eeprom.uspb[] is the average beat duration (in microseconds) at the temperature of that bucket. The second, 
- *   eeprom.curSmoothing[], is the number of samples that went into the average so far. Calibration consists of
- *   accumulating TGT_SMOOTHING samples. A sample is accumulated if the temperature is within 1/8 degree C of the
- *   temperature of the bucket when the beat takes place.
+ *   eeprom.sampleCount[], is the number of samples that went into the average so far. A sample is collected if the 
+ *   temperature is within 1/8 degree C of the center-temperature of the bucket when the beat takes place. Data 
+ *   collection for a bucket consists of collecting TGT_SAMPLES samples for that bucket.
  *
- *   If, during calibration, the temperature changes enough to fall into a different bucket before TGT_SMOOTHING 
- *   beats pass, the progress made in calibrating for the old temperature bucket is maintained in eeprom.uspb[] and 
- *   eeprom.curSmoothing[], and calibration at the new temperature bucket is started or, if partial calibration for at 
- *   that temperature bucket has been done earlier, resumed. When TGT_SMOOTHING samples have been taken for a bucket, 
- *   the Escapement object stores the contents of eeprom -- Escapement's persistent parameters -- in the Arduino's 
- *   EEPROM and switches to CALFINISH mode. During CALIBRATE mode, the duration beat() returns is measured using the 
- *   (corrected) Arduino real-time clock.
+ *   If, during collection, the temperature changes enough to fall into a different bucket before TGT_SAMPLES 
+ *   samples are collected, the progress made in collecting samples for the old temperature bucket is maintained in 
+ *   eeprom.uspb[] and eeprom.sampleCount[], and collecting at the new temperature bucket is started or resumed. 
+ *   When TGT_SAMPLES samples have been taken for a bucket, the Escapement object stores the contents of the eeprom 
+ *   structure -- Escapement's persistent parameters -- in the Arduino's EEPROM and switches to MODEL mode. During 
+ *   COLLECT mode, beat() returns the duration measured using the (corrected) Arduino real-time clock.
  *
- *   The CALFINISH mode does two things. First, it serves as notice to the using sketch that calibration for the 
- *   current temperature bucket is complete. And second, it uses the currently accumulated calibration information to
- *   least-squares fit model of the length of a beat as a function of temperature. The Escapement object then switches 
- *   to RUN mode. In CALFINISH mode, the duration beat() returns is measured using the (corrected) Arduino real-time 
- *   clock.
- *
- *   The net effect is that the Escapement object automatically characterizes the bendulum or pendulum it is driving 
- *   by determining the average duration of the beats at half-degree intervals as it encounters different temperatures. 
- *   Once the calibration is done for a given temperature range, it assumes the bendulum or pendulum behaves linearly 
- *   with temperature between calibration points.
+ *   The net effect of the COLLECT and MODEL modes is that the Escapement object automatically characterizes the 
+ *   bendulum or pendulum it is driving by determining the average duration of beats at half-degree intervals as it 
+ *   encounters different temperatures. It uses this information to calcualte a linear least-squares model of beat 
+ *   duration as a function of temperature. It uses the model to calculate beat duration during RUN mode.
  *
  *   This would work nearly perfectly except that, as hinted at above, the real-time clock in most Arduinos is stable 
  *   but not too accurate (it's a ceramic resonator, not a crystal). That is, real-time clock ticks are essentially 
@@ -110,11 +115,11 @@
  *   eeprom.bias is set correctly. To help with setting eeprom.bias Escapement has one more mode: CALRTC.
  *
  *   In CALRTC mode, the duration beat() returns is the value measured by the (corrected) Arduino real-time clock. The  
- *   CALRTC mode persists until changed by setRunMode(). Because the value returned is the real-time-clock-measured 
- *   value, in this mode the Escapement is effectively driven by the real-time clock, not the pendulum or bendulum, 
- *   despite its ticking and tocking. The idea is to use the mode to adjust the real-time clock calibration (via the 
- *   setBias() and incrBias() methods) so that the clock driven by the Escapement keeps perfect time. Once the real-
- *   time clock is calibrated, entering CALIBRATE mode should produce a good automatic calibration.
+ *   CALRTC mode persists until changed by the Arduino sketch using setRunMode(). Because the value returned is the 
+ *   real-time-clock-measured value, in this mode the Escapement is effectively driven by the real-time clock, not the 
+ *   pendulum or bendulum, despite its ticking and tocking. The idea is to use the mode to adjust the real-time clock 
+ *   calibration (via the setBias() and incrBias() methods) so that the clock driven by the Escapement keeps perfect 
+ *   time. Once the real-time clock is calibrated, COLLECT mode should collect a good information about beat duration.
  *
  ****/
 
@@ -149,12 +154,11 @@ void Escapement::enable(byte initialMode) {
 											//   induced current doesn't flow to ground
 	Wire.begin();							// Prep to talk to the TMP102 temperature sensor
 	beatCounter = 1;						// Initialize beatCounter
-	lastTemp = NO_TEMP;						// No lastTemp
-	temp = readTemp();						//   but there is a temp
-	tempIx = getTempIx(temp);
+	temp = readTemp();						// Try reading the temp sensor
+	slope = yIntercept = 0;					// There's no model yet
 	tick = true;							// Whether currently awaiting a tick or a tock
 	tickLength = tockLength = 0;			// Length of last tick and tock periods (μs)
-	timeBeforeLast = lastTime = 0;			// Real time clock time (μs) last time through beat() (and time before that)
+	lastTime = 0;							// Real time clock time (μs) last time through beat()
 	deltaT = 0;								// Length of last beat (μs)
 
 	if (initialMode != COLDSTART) {			// If forced cold start isn't requested
@@ -163,7 +167,7 @@ void Escapement::enable(byte initialMode) {
 											//      If temp compensation mode matches
 				setRunMode(WARMSTART);		//		  Start in WARMSTART mode
 			} else {
-				setRunMode(CALSTART);		//      Otherwise start in CALSTART mode
+				setRunMode(CALIBRATE);		//      Otherwise start in CALIBRATE mode
 			}
 		} else {							//   Else (invalid data in EEPROM)
 			setRunMode(COLDSTART);			//     Cold start
@@ -171,6 +175,7 @@ void Escapement::enable(byte initialMode) {
 	} else {								//  Else (forced cold start)
 		setRunMode(COLDSTART);				//    Cold start
 	}
+	tempIx = getTempIx(temp);				// Set up tempIx based on the temp
 }
  
 // Do one beat return length of a beat in μs
@@ -181,7 +186,6 @@ long Escapement::beat(){
 												//   is about 1.6 mV, más o menos. The exact value doesn't really matter 
 												//   since we're looking for a peak above noise.
 	unsigned int pastCoil = 0;					// The previous value of currCoil
-	unsigned long topTime = 0;					// Clock time (μs) of passing of the magnet
 	
 	// watch for passing magnet
 	delay(SETTLE_TIME);							// Wait for things to calm down
@@ -197,7 +201,8 @@ long Escapement::beat(){
 		}
 		currCoil /= N_SAMPLES * NOISE_SIZE;
 	} while (currCoil >= pastCoil);
-	topTime= micros();							// Remember when magnet went by
+	lastTime = topTime;
+	topTime = micros();							// Remember when magnet went by
 	
 	// Kick the magnet to keep it going
 	pinMode(kickPin, OUTPUT);					// Prepare kick pin for output
@@ -223,108 +228,102 @@ long Escapement::beat(){
 	} else {									//   else (tock)
 		tockLength = deltaT;					//     Set tockLength to beat length
 	}
-	if (temp != NO_TEMP) {						// If running temperature compensated
-		lastTemp = temp;						//   Remember old temp so we can tell if it changed
+	if (temp != NO_TEMP) {						// If temperature sensor is present
 		temp = readTemp();						//   Update the temperature
 		tempIx = getTempIx(temp);				//   And figure out which "bucket" of temperatures it's in
 	}
 
 	switch (runMode) {
 		case COLDSTART:							// When cold starting
-			setRunMode(WARMSTART);				//   eeprom.* has already been set to default so switch to CALSTART mode
+			setRunMode(WARMSTART);				//   eeprom.* has already been set to default so switch to WARMSTART mode
 			break;
 		case WARMSTART:							// When warmstarting
-			if (tick) {							//   If tick, remember tickLength
-				tickLength = deltaT;
-			} else {							//   Else (tock), remember tockLength
-				tockLength = deltaT;
-			}
-			if (++beatCounter > TGT_WARMUP) {
-				setRunMode(RUN);				//   If just did the warm-up switch from WARMSTART to RUN
+			if (++beatCounter > TGT_WARMUP) {	//   Let things tick along for TGT_WARMUP beats
+				setRunMode(MODEL);				//   then switch to MODEL
 			}
 			break;
-		case CALSTART:							// When starting a calibration,
+		case CALIBRATE:							// When starting a calibration,
 			setRunMode(WARMSTART);				//   Begin by warming up to be sure everything is settled
 			break;
-		case CALIBRATE:							// When doing calibration
-			if (tempIx == NO_CAL) break;		//   If not in calibration temp range, don't try doing it
-			if (eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
-												//   If temp index is already calibrated
+		case COLLECT:							// When doing calibration
+			if (tempIx == NO_CAL) break;		//   If outside temp range for which we do calibration, don't do it
+			if (eeprom.sampleCount[tempIx] > TGT_SAMPLES) {
+												//   If we already have all the data we need for this temp
 				setRunMode(RUN);				//     Switch to RUN mode
 				break;
 			}
-			if (!eeprom.compensated) {			// If not temperature compensated
-				eeprom.uspb[tempIx] += (deltaT - eeprom.uspb[tempIx]) / eeprom.curSmoothing[tempIx];
-												//   Update running average
-				if (++eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
-												//   If just reached a full smoothing interval
-					writeEEPROM();				//     Make calibration parms persistent
-					setRunMode(CALFINISH);		//     Switch to CALFINISH mode
-				}
-			} else {
 /****
  *
- *			Temperature-compensated calibration model
- *
- *			Each of the tempIx buckets is the average beat duration at temperature t(tempIx) in degrees Celsius * 256)
+ *			Each of the tempIx buckets is the average beat duration at temperature t(tempIx) in degrees Celsius * 256
  *			where t(tempIx) = tempIx * 128 + TEMP_MIN * 256. If the current temperature corresponds to one of the buckets
  *			(i.e., it falls within 1/8 degree of one of the half-degree intervals), the running average is updated with 
- *			the current measured duration. If the current temperature falls somewhere else, nothing is done.
+ *			the current measured duration. If the current temperature falls somewhere else, nothing is done. If running
+ *			uncompensated, temp is always TEMP_MIN * 256 and tempIx is always 0.
  *
  ****/
 
-				if(abs(temp - ((tempIx << 7) + (TEMP_MIN << 8))) <= 32) {
-													// If current temp matches a tempIx bucket to with 1/8 degree C
-					eeprom.uspb[tempIx] += (deltaT - eeprom.uspb[tempIx]) / eeprom.curSmoothing[tempIx];
-													//   Update running average
-					if (++eeprom.curSmoothing[tempIx] > TGT_SMOOTHING) {
-													//   If just reached a full smoothing interval
-						writeEEPROM();				//     Make calibration parms persistent
-						setRunMode(CALFINISH);		//     Switch to CALFINISH mode
-					}
+			if(abs(temp - ((tempIx << 7) + (TEMP_MIN << 8))) <= 32) {
+												//   If current temp matches a tempIx bucket to within 1/8 degree C
+				eeprom.uspb[tempIx] += (deltaT - eeprom.uspb[tempIx]) / eeprom.sampleCount[tempIx];
+												//     Update running average
+				if (++eeprom.sampleCount[tempIx] > TGT_SAMPLES) {
+												//   If just reached a full smoothing interval
+					writeEEPROM();				//     Make calibration parms persistent
+					setRunMode(MODEL);			//     Switch to MODEL mode
 				}
 			}
 			break;
-		case CALFINISH:							// When finished calibrating
+		case MODEL:							// When finished calibrating
+			{
+				float xSum = 0.0;				//   Have a go at calculating the linear least squares for the data so far
+				float ySum = 0.0;
+				float xxSum = 0.0;
+				float xySum = 0.0;
+				int count = 0;
+				for (int i = 0; i < TEMP_STEPS; i++) {
+					if (eeprom.sampleCount[i] > TGT_SAMPLES) {
+						float x = (((TEMP_MIN << 1) + i) << 7);
+						float y = eeprom.uspb[i];
+						count++;
+						xSum += x;
+						ySum += y;
+						xxSum += x * x;
+						xySum += x * y;
+					}
+				}
+				if (count < 1) {				//   If not even one bucket is complete, continue collecting data
+					setRunMode(COLLECT);
+					break;
+				} else {						//   Otherwise calculate linear lsq model parameters
+					slope = count > 1 ? ((count * xySum - xSum * ySum) / (count * xxSum - xSum * xSum)) * 4096.0 : 0;
+					yIntercept = (ySum - (slope / 4096.0) * xSum) / count;
+#ifdef DEBUG
+					Serial.print("MODEL slope: ");
+					Serial.print(slope);
+					Serial.print(", yIntercept: ");
+					Serial.println(yIntercept);
+#endif
+				}
+			}
 			setRunMode(RUN);					//  Switch to RUN mode
 			break;
 		case RUN:								// When running
-			if (!eeprom.compensated) {			//   If not temperature-compensated
-				deltaT = eeprom.uspb[tempIx] + eeprom.deltaUspb;
-												//     deltaT is the calibration value plus the manual correction
-				break;							//     Done!
+			if (tempIx == NO_CAL) break;		//   If outside temp range, use rtc measured value
+			if (yIntercept == 0) {				//   If the model hasn't been calculated
+				setRunMode(MODEL);				//     Use rtc measured value and build the model at the next beat
+				break;
 			}
-			// Temperature-compensated model
-			if (tempIx != NO_CAL) {				//   If within calibrated temp range
-				int deltaTemp = temp - ((TEMP_MIN + tempIx) << 8);
-												//     deltaTemp = temp - t(tempIx)
-				if (eeprom.curSmoothing[tempIx] <= TGT_SMOOTHING ||
-					(deltaTemp > 0 && (tempIx + 1 >= TEMP_STEPS || eeprom.curSmoothing[tempIx + 1] <= TGT_SMOOTHING)) ||
-					(deltaTemp < 0 && (tempIx - 1 < 0 || eeprom.curSmoothing[tempIx - 1] <= TGT_SMOOTHING))){
-					setRunMode(CALIBRATE);		//     If the model isn't yet calibrated for this temperature,
-					break;						//       switch to CALIBRATE mode for next beat
-				}
-				if (deltaTemp > 0) {			//   If temp is above t(tempIx)
-//							 <---------- slope: (y2 - y1) / (x2 - x1) -----------> * deltaTemp
-					deltaT = (eeprom.uspb[tempIx + 1] - eeprom.uspb[tempIx])/128.0 * deltaTemp + 
-					eeprom.uspb[tempIx] + eeprom.deltaUspb;
-												//       deltaT is linear interp above [tempIx] plus the manual correction
-				} else if (deltaTemp < 0) {		//   else if temp is below t(tempIx)
-//							 <---------- slope: (y2 - y1) / (x2 - x1) -----------> * deltaTemp
-					deltaT = (eeprom.uspb[tempIx] - eeprom.uspb[tempIx - 1])/128.0 * deltaTemp + 
-					eeprom.uspb[tempIx] + eeprom.deltaUspb;
-												//       deltaT is linear interp below [tempIx] plus the manual correction
-				} else {						//   else temp is equal to t(tempIx)
-					deltaT = eeprom.uspb[tempIx] + eeprom.deltaUspb;
-				}
+			if (eeprom.sampleCount[tempIx] <= TGT_SAMPLES) {
+				setRunMode(COLLECT);			//   If not finished collecting data for this temp,
+				break;							//     use rtc measured value and switch to COLLECT
 			}
+			deltaT = (slope * temp) / 4096 + yIntercept + eeprom.deltaUspb;
+												//     deltaT is what the model says it is + manual correction
 			break;
 		case CALRTC:							// When calibrating the Arduino real-time clock
 			break;
 	}
 	tick = !tick;								// Switch whether a tick or a tock
-	timeBeforeLast = lastTime;					// Update timeBeforeLast
-	lastTime = topTime;							// Update lastTime
 	return deltaT;								// Return calculated μs per beat
 }
 
@@ -335,8 +334,9 @@ long Escapement::beat(){
  */
 
 // Return the current smoothing information for the current temp.
-String Escapement::getSmoothing() {
-	return String(eeprom.curSmoothing[getTempIx(temp)]);
+int Escapement::getSmoothing() {
+	int ix = getTempIx(temp);
+	return ix == NO_CAL ? 0 : eeprom.sampleCount[ix];
 }
  
 // Get, set or increment Arduino clock run rate correction in tenths of a second per day
@@ -369,24 +369,23 @@ boolean Escapement::isTempComp() {
 	return eeprom.compensated;
 }
 
-// Get average beats per minute for the current bucket or 0.0 if none
-float Escapement::getAvgBpm(){
-	if (tempIx == NO_CAL || eeprom.uspb[tempIx] + eeprom.deltaUspb == 0) return 0.0;
-	
-	return 60000000.0 / (eeprom.uspb[tempIx] + eeprom.deltaUspb);
+// Get beats per minute as modeled. If no model or outside of temperature range return 0.0
+float Escapement::getBpmModel(){
+	if (yIntercept == 0 || tempIx == NO_CAL) return 0.0;
+	return 60000000.0 / ((slope * temp) / 4096 + yIntercept + eeprom.deltaUspb);
 }
 
 // Get current beats per minute as measured by the (corrected) real-time clock
-float Escapement::getCurBpm(){
+float Escapement::getBpmRTC(){
 	unsigned long diff;
-	if (lastTime == 0 || timeBeforeLast == 0) return 0;
-	diff = lastTime - timeBeforeLast;
+	if (lastTime == 0) return 0;
+	diff = topTime - lastTime;
 	diff += ((eeprom.bias * diff) + 432000) / 864000;
 	return 60000000.0 / diff;
 }
 
 // Get the value last returned by beat() converted to bpm
-float Escapement::getBeatBpm() {
+float Escapement::getBpmBeat() {
 	return 60000000.0 / deltaT;
 }
 
@@ -399,10 +398,10 @@ float Escapement::getDelta(){
 int Escapement::getBeatCounter(){
 	return beatCounter;
 }
-// Get current beat duration in microseconds
+// Get current beat duration as measured by the RTC (μs)
 long Escapement::getBeatDuration(){
-	if (lastTime == 0 || timeBeforeLast == 0) return 0;
-	return lastTime - timeBeforeLast + eeprom.deltaUspb;
+	if (lastTime == 0) return 0;
+	return topTime - lastTime;
 }
 // Get or set the beat delta in μs per beat or increment it in tenths of a second per day
 long Escapement::getBeatDelta() {
@@ -415,35 +414,43 @@ void Escapement::setBeatDelta(long beatDelta) {
 long Escapement::incrBeatDelta(long incr) {
 	eeprom.deltaUspb += round(deltaT * (incr / 864000.0));	
 	writeEEPROM();								// Make it persistent
-	return (eeprom.deltaUspb * 864000.0) / deltaT;
+	return (eeprom.deltaUspb * 864000.0) / deltaT; // Return new deltaUspb in s/day
+}
+float Escapement::getM() {
+	return float(slope)/4096.0;
+}
+long Escapement::getB() {
+	return yIntercept;
 }
 
-// Get/set the current run mode -- COLDSTART, WARMSTART, CALIBRATE, RUN or CALRTC
+// Get/set the current run mode -- COLDSTART, WARMSTART, COLLECT, RUN or CALRTC
 byte Escapement::getRunMode(){
 	return runMode;
 }
 void Escapement::setRunMode(byte mode){
 	switch (mode) {
 		case COLDSTART:								//   Switch to cold starting mode
-			eeprom.id = 0;							//     Say eeprom not written
-			eeprom.bias = 0;						//     and rtc correction (tenths of a second per day) is zero
+			eeprom.id = 0;							//     Say eeprom not written,
+			eeprom.bias = 0;						//     rtc correction (tenths of a second per day) is zero
+			eeprom.compensated = temp != NO_TEMP;	//     and use whether we could read the temp to set compensated
 			break;
 		case WARMSTART:								//   Switch to warm starting mode
-			beatCounter = 1;						//     Reset cycle counter
+			beatCounter = 1;						//     Reset the beat counter
 			break;
-		case CALSTART:								//   Switch to starting a new calibration run
+		case CALIBRATE:								//   Switch to starting a new calibration run
 			eeprom.compensated = temp != NO_TEMP;	//     Choose the calibration model: temp compensated or not
 			eeprom.deltaUspb = 0;					//     Default the clock speed adjustment
 			for (int i = 0; i < TEMP_STEPS; i++) {
 				eeprom.uspb[i] = 0;					//     Wipe out old calibration info, if any
-				eeprom.curSmoothing[i] = 1;
+				eeprom.sampleCount[i] = 1;
 			}
+			slope = yIntercept = 0;					//     Do away with the old linear least squares model, too
 			break;
-		case CALIBRATE:								//   Switch to basic calibration mode
+		case COLLECT:								//   Switch to data collection mode
 			break;
-		case CALFINISH:								//   Switch to calibration finished mode
+		case MODEL:									//   Switch to model creation mode
 			break;
-		case RUN:									//   Switch to RUN mode
+		case RUN:									//   Switch to normal running mode
 			break;
 		case CALRTC:								//   Switch to real-time clock calibration mode
 			break;
@@ -505,19 +512,16 @@ int Escapement::getTempIx(int t) {
 boolean Escapement::readEEPROM() {
 	
 	eeprom_read_block((void*)&eeprom, (const void*)0, sizeof(eeprom)); // Read from EEPROM
-#ifdef DEBUG
-	eeprom.id = 0; 								// Debug: Force eeprom.id to be wrong
-#endif
 	if (eeprom.id == SETTINGS_TAG) {			// If it looks like ours
 		return true;							//  Say we read it okay
 	} else {									// Otherwise
 		eeprom.id = 0;							//   Default id to note that eeprom not read
 		eeprom.bias = 0;						//   Default eeprom.bias (tenths of a second per day)
 		eeprom.deltaUspb = 0;					//   Default eeprom.deltaUspb
-		eeprom.compensated = true;
-		for (int i = 0; i < TEMP_STEPS; i++) {	//   Default eeprom.uspb, eeprom.temp and eeprom.curSmoothing
+		eeprom.compensated = temp != NO_TEMP;	//   True iff sensor hardware existed at enable() time
+		for (int i = 0; i < TEMP_STEPS; i++) {	//   Default eeprom.uspb, eeprom.temp and eeprom.sampleCount
 			eeprom.uspb[i] = 0;
-			eeprom.curSmoothing[i] = 1;
+			eeprom.sampleCount[i] = 1;
 		}
 		return false;
 	}
