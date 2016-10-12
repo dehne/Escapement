@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.85
+ *   Part of the "Escapement" library for Arduino. Version 0.86
  *
  *   Escapement.h Copyright 2014-2015 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -57,7 +57,7 @@
 struct settings_t {							// Structure of data stored in EEPROM
 	unsigned int id;						// ID tag to know whether data (probably) belongs to this sketch
 	int bias;								// Empirically determined correction factor for the real-time clock in 0.1 s/day
-	long deltaUspb;							// Speed adjustment factor, μs per beat
+	long speedAdj;							// Speed adjustment factor in tenths of a second per day
 	bool compensated;						// Set to true if the Escapement is temperature compensated, else false
 	long uspb[TEMP_STEPS];					// Measured μs per beat averaged over sampleCount samples
 	int sampleCount[TEMP_STEPS];			// Count of samples taken for this temp bucket
@@ -109,9 +109,9 @@ public:
 	float getDelta();						// Get the current ratio of tick length to tock length
 	int getBeatCounter();					// Get the number of beats spent in WARMSTART mode
 	long getBeatDuration();					// Get the beat duration in μs
-	long getBeatDelta();					// Get the beat duration delta (i.e., manual adjustment) in μs/beat
-	void setBeatDelta(long beatDelta);		// Set the beat duration delta (i,e., manual adjustment) in μs/beat
-	long incrBeatDelta(long incr);			// Increment beat duration delta by incr/10 s/day return new value in s/day
+	long getSpeedAdj();						// Get the manual speed adjustment) in tenths of a second per day
+	void setSpeedAdj(long speedAdj);		// Set the manual adjustment) in tenths of a second per day
+	long incrSpeedAdj(long incr);			// Increment manual adjustment by incr tenths of a second per day, return new value
 	float getM();							// Get slope of linear least squares model
 	long getB();							// Get yIntercept of linear least squares model
 	byte getRunMode();						// Get the current run mode -- SETTLING, CALIBRATING or RUNNING

@@ -219,7 +219,7 @@ long Escapement::beat(){
 	}
 	deltaT = topTime - lastTime;				// Assume microseconds per beat will be whatever we measured for this beat
 												// plus the (rounded) Arduino clock correction
-	deltaT += ((eeprom.bias * deltaT) + 432000) / 864000;
+	deltaT += ((eeprom.bias * deltaT) + 432000L) / 864000L;
 	if (deltaT > 5000000) {						// If the measured beat is more than 5 seconds long
 		return deltaT = 0;						//   it can't be real -- just ignore it and return
 	}
@@ -317,7 +317,9 @@ long Escapement::beat(){
 				setRunMode(COLLECT);			//   If not finished collecting data for this temp,
 				break;							//     use rtc measured value and switch to COLLECT
 			}
-			deltaT = (slope * temp) / 4096 + yIntercept + eeprom.deltaUspb;
+			deltaT = slope * temp / 4096L + yIntercept;
+			deltaT += ((deltaT / 864L) * eeprom.speedAdj) / 1000L;
+												//     i.e., deltaT * eeprom.speedAdj / 864000 without large intermediate results
 												//     deltaT is what the model says it is + manual correction
 			break;
 		case CALRTC:							// When calibrating the Arduino real-time clock
@@ -372,7 +374,9 @@ boolean Escapement::isTempComp() {
 // Get beats per minute as modeled. If no model or outside of temperature range return 0.0
 float Escapement::getBpmModel(){
 	if (yIntercept == 0 || tempIx == NO_CAL) return 0.0;
-	return 60000000.0 / ((slope * temp) / 4096 + yIntercept + eeprom.deltaUspb);
+	long dT = slope * temp / 4096L + yIntercept;
+	dT += eeprom.speedAdj / 864000L;
+	return 60000000.0 / dT;
 }
 
 // Get current beats per minute as measured by the (corrected) real-time clock
@@ -403,18 +407,18 @@ long Escapement::getBeatDuration(){
 	if (lastTime == 0) return 0;
 	return topTime - lastTime;
 }
-// Get or set the beat delta in μs per beat or increment it in tenths of a second per day
-long Escapement::getBeatDelta() {
-	return eeprom.deltaUspb;
+// Get, set or increment the manual speed adjustment in tenths of a second per day
+long Escapement::getSpeedAdj() {
+	return eeprom.speedAdj;
 }
-void Escapement::setBeatDelta(long beatDelta) {
-	eeprom.deltaUspb = beatDelta;
+void Escapement::setSpeedAdj(long speedAdj) {
+	eeprom.speedAdj = speedAdj;
 	writeEEPROM();								// Make it persistent
 }
-long Escapement::incrBeatDelta(long incr) {
-	eeprom.deltaUspb += round(deltaT * (incr / 864000.0));	
+long Escapement::incrSpeedAdj(long incr) {
+	eeprom.speedAdj += incr;	
 	writeEEPROM();								// Make it persistent
-	return (eeprom.deltaUspb * 864000.0) / deltaT; // Return new deltaUspb in s/day
+	return eeprom.speedAdj;						// Return new value
 }
 float Escapement::getM() {
 	return float(slope)/4096.0;
@@ -439,7 +443,7 @@ void Escapement::setRunMode(byte mode){
 			break;
 		case CALIBRATE:								//   Switch to starting a new calibration run
 			eeprom.compensated = temp != NO_TEMP;	//     Choose the calibration model: temp compensated or not
-			eeprom.deltaUspb = 0;					//     Default the clock speed adjustment
+			eeprom.speedAdj = 0;					//     Default the clock speed adjustment
 			for (int i = 0; i < TEMP_STEPS; i++) {
 				eeprom.uspb[i] = 0;					//     Wipe out old calibration info, if any
 				eeprom.sampleCount[i] = 1;
@@ -516,8 +520,8 @@ boolean Escapement::readEEPROM() {
 		return true;							//  Say we read it okay
 	} else {									// Otherwise
 		eeprom.id = 0;							//   Default id to note that eeprom not read
-		eeprom.bias = 0;						//   Default eeprom.bias (tenths of a second per day)
-		eeprom.deltaUspb = 0;					//   Default eeprom.deltaUspb
+		eeprom.bias = 0;						//   Default RTC speed correction
+		eeprom.speedAdj = 0;					//   Default manual speed adjustment
 		eeprom.compensated = temp != NO_TEMP;	//   True iff sensor hardware existed at enable() time
 		for (int i = 0; i < TEMP_STEPS; i++) {	//   Default eeprom.uspb, eeprom.temp and eeprom.sampleCount
 			eeprom.uspb[i] = 0;

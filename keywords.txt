@@ -25,9 +25,9 @@ getBpmBeat	KEYWORD2
 getDelta	KEYWORD2
 getBeatCounter	KEYWORD2
 getBeatDuration	KEYWORD2
-getBeatDelta	KEYWORD2
-setBeatDelta	KEYWORD2
-incrBeatDelta	KEYWORD2
+getSpeedAdj	KEYWORD2
+setSpeedAdj	KEYWORD2
+incrSpeedAdj	KEYWORD2
 getM	KEYWORD2
 getB	KEYWORD2
 getRunMode	KEYWORD2
