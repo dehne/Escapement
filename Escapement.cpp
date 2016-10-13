@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.85
+ *   Part of the "Escapement" library for Arduino. Version 0.86
  *
  *   Escapement.cpp Copyright 2014-2016 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
