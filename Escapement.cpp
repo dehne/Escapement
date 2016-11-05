@@ -1,6 +1,6 @@
 /****
  *
- *   Part of the "Escapement" library for Arduino. Version 0.86
+ *   Part of the "Escapement" library for Arduino. Version 0.87
  *
  *   Escapement.cpp Copyright 2014-2016 by D. L. Ehnebuske 
  *   License terms: Creative Commons Attribution-ShareAlike 3.0 United States (CC BY-SA 3.0 US) 
@@ -297,6 +297,7 @@ long Escapement::beat(){
 				} else {						//   Otherwise calculate linear lsq model parameters
 					slope = count > 1 ? ((count * xySum - xSum * ySum) / (count * xxSum - xSum * xSum)) * 4096.0 : 0;
 					yIntercept = (ySum - (slope / 4096.0) * xSum) / count;
+					eeprom.speedAdj = 0;		//     and set the speed adjustment to 0 since it went with the old model (if any)
 #ifdef DEBUG
 					Serial.print("MODEL slope: ");
 					Serial.print(slope);
